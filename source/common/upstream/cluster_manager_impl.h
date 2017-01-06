@@ -1,8 +1,10 @@
 #pragma once
 
+#include "cds_api.h"
 #include "sds.h"
 
 #include "envoy/http/codes.h"
+#include "envoy/local_info/local_info.h"
 #include "envoy/runtime/runtime.h"
 #include "envoy/thread_local/thread_local.h"
 #include "envoy/upstream/cluster_manager.h"
@@ -21,9 +23,11 @@ public:
                             ThreadLocal::Instance& tls, Runtime::RandomGenerator& random,
                             Network::DnsResolver& dns_resolver,
                             Ssl::ContextManager& ssl_context_manager,
-                            Event::Dispatcher& primary_dispatcher)
+                            Event::Dispatcher& primary_dispatcher,
+                            const LocalInfo::LocalInfo& local_info)
       : runtime_(runtime), stats_(stats), tls_(tls), random_(random), dns_resolver_(dns_resolver),
-        ssl_context_manager_(ssl_context_manager), primary_dispatcher_(primary_dispatcher) {}
+        ssl_context_manager_(ssl_context_manager), primary_dispatcher_(primary_dispatcher),
+        local_info_(local_info) {}
 
   // Upstream::ClusterManagerFactory
   Http::ConnectionPool::InstancePtr allocateConnPool(Event::Dispatcher& dispatcher,
@@ -41,6 +45,7 @@ private:
   Network::DnsResolver& dns_resolver_;
   Ssl::ContextManager& ssl_context_manager_;
   Event::Dispatcher& primary_dispatcher_;
+  const LocalInfo::LocalInfo& local_info_;
 };
 
 /**
@@ -51,8 +56,8 @@ class ClusterManagerImpl : public ClusterManager {
 public:
   ClusterManagerImpl(const Json::Object& config, ClusterManagerFactory& factory,
                      Stats::Store& stats, ThreadLocal::Instance& tls, Runtime::Loader& runtime,
-                     Runtime::RandomGenerator& random, const std::string& local_zone_name,
-                     const std::string& local_address, AccessLog::AccessLogManager& log_manager);
+                     Runtime::RandomGenerator& random, const LocalInfo::LocalInfo& local_info,
+                     AccessLog::AccessLogManager& log_manager);
 
   // Upstream::ClusterManager
   bool addOrUpdatePrimaryCluster(const Json::Object& config) override;
@@ -77,7 +82,10 @@ public:
   Host::CreateConnectionData tcpConnForCluster(const std::string& cluster) override;
   Http::AsyncClient& httpAsyncClientForCluster(const std::string& cluster) override;
   bool removePrimaryCluster(const std::string& cluster) override;
-  void shutdown() override { primary_clusters_.clear(); }
+  void shutdown() override {
+    cds_api_.reset();
+    primary_clusters_.clear();
+  }
 
 private:
   /**
@@ -155,8 +163,8 @@ private:
   Optional<SdsConfig> sds_config_;
   std::list<Cluster*> secondary_init_clusters_;
   Outlier::EventLoggerPtr outlier_event_logger_;
-  const std::string local_zone_name_;
-  const std::string local_address_;
+  const LocalInfo::LocalInfo& local_info_;
+  CdsApiPtr cds_api_;
 };
 
 } // Upstream

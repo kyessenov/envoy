@@ -3,6 +3,7 @@
 
 #include "test/common/http/common.h"
 #include "test/mocks/http/mocks.h"
+#include "test/mocks/local_info/mocks.h"
 #include "test/mocks/router/mocks.h"
 #include "test/mocks/runtime/mocks.h"
 #include "test/mocks/ssl/mocks.h"
@@ -39,7 +40,7 @@ class RouterTest : public testing::Test {
 public:
   RouterTest()
       : shadow_writer_(new MockShadowWriter()),
-        config_("test.", "from_az", stats_store_, cm_, runtime_, random_,
+        config_("test.", local_info_, stats_store_, cm_, runtime_, random_,
                 ShadowWriterPtr{shadow_writer_}, true),
         router_(config_) {
     router_.setDecoderFilterCallbacks(callbacks_);
@@ -67,6 +68,7 @@ public:
   Http::ConnectionPool::MockCancellable cancellable_;
   NiceMock<Http::MockStreamDecoderFilterCallbacks> callbacks_;
   MockShadowWriter* shadow_writer_;
+  LocalInfo::MockLocalInfo local_info_;
   FilterConfig config_;
   TestFilter router_;
   Event::MockTimer* response_timeout_{};

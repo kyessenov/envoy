@@ -14,7 +14,7 @@
 #include "common/common/utility.h"
 #include "common/common/version.h"
 #include "common/memory/stats.h"
-#include "common/network/utility.h"
+//#include "common/network/utility.h"
 #include "common/runtime/runtime_impl.h"
 #include "common/stats/stats_impl.h"
 #include "common/stats/statsd.h"
@@ -23,13 +23,15 @@ namespace Server {
 
 InstanceImpl::InstanceImpl(Options& options, TestHooks& hooks, HotRestart& restarter,
                            Stats::Store& store, Thread::BasicLockable& access_log_lock,
-                           ComponentFactory& component_factory)
+                           ComponentFactory& component_factory,
+                           const LocalInfo::LocalInfo& local_info)
     : options_(options), restarter_(restarter), start_time_(time(nullptr)),
       original_start_time_(start_time_), stats_store_(store),
       server_stats_{ALL_SERVER_STATS(POOL_GAUGE_PREFIX(stats_store_, "server."))},
       handler_(stats_store_, log(), Api::ApiPtr{new Api::Impl(options.fileFlushIntervalMsec())}),
       dns_resolver_(handler_.dispatcher().createDnsResolver()),
-      local_address_(Network::Utility::getLocalAddress()),
+      // fixfixlocal_address_(Network::Utility::getLocalAddress()),
+      local_info_(local_info),
       access_log_manager_(handler_.api(), handler_.dispatcher(), access_log_lock, store) {
 
   failHealthcheck(false);
@@ -40,9 +42,9 @@ InstanceImpl::InstanceImpl(Options& options, TestHooks& hooks, HotRestart& resta
   }
   server_stats_.version_.set(version_int);
 
-  if (local_address_.empty()) {
+  /*if (local_address_.empty()) {
     throw EnvoyException("could not resolve local address");
-  }
+  }*/
 
   restarter_.initialize(handler_.dispatcher(), *this);
   drain_manager_ = component_factory.createDrainManager(*this);
@@ -238,7 +240,7 @@ Runtime::LoaderPtr InstanceUtil::createRuntime(Instance& server,
     log().info("runtime subdirectory: {}", config.runtime()->subdirectory());
 
     std::string override_subdirectory =
-        config.runtime()->overrideSubdirectory() + "/" + server.options().serviceClusterName();
+        config.runtime()->overrideSubdirectory() + "/" + server.localInfo().clusterName();
     log().info("runtime override subdirectory: {}", override_subdirectory);
 
     return Runtime::LoaderPtr{new Runtime::LoaderImpl(
@@ -258,9 +260,9 @@ void InstanceImpl::initializeStatSinks() {
 
   if (config_->statsdTcpClusterName().valid()) {
     log().info("statsd TCP cluster: {}", config_->statsdTcpClusterName().value());
-    stat_sinks_.emplace_back(new Stats::Statsd::TcpStatsdSink(
-        options_.serviceClusterName(), options_.serviceNodeName(),
-        config_->statsdTcpClusterName().value(), thread_local_, config_->clusterManager()));
+    stat_sinks_.emplace_back(
+        new Stats::Statsd::TcpStatsdSink(local_info_, config_->statsdTcpClusterName().value(),
+                                         thread_local_, config_->clusterManager()));
     stats_store_.addSink(*stat_sinks_.back());
   }
 }
