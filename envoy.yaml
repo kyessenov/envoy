@@ -25,13 +25,25 @@ static_resources:
             config:
               expr:
                 call_expr:
-                  function: _[_]
+                  function: "_?_:_"
                   args:
-                    - select_expr:
-                        operand:
-                          ident_expr: { name: request }
-                        field: headers
-                    - const_expr: {string_value: x-istio}
+                  - call_expr:
+                      function: "@in"
+                      args:
+                      - const_expr: {string_value: x-istio}
+                      - select_expr:
+                          operand:
+                            ident_expr: { name: request }
+                          field: headers
+                  - call_expr:
+                      function: "_[_]"
+                      args:
+                      - select_expr:
+                          operand:
+                            ident_expr: { name: request }
+                          field: headers
+                      - const_expr: {string_value: x-istio}
+                  - const_expr: {string_value: "missing value"}
           http_filters:
           - name: envoy.router
           route_config:

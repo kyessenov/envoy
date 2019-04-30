@@ -51,6 +51,7 @@ void Filter::log(const ::Envoy::Http::HeaderMap* request_headers,
   ExtractContext(context, *request_headers);
   ExtractReportData(request, response, context, *response_headers, *response_trailers, stream_info);
 
+  /* the block below should be moved to the filter factory */
   google::api::expr::v1alpha1::SourceInfo source_info;
   std::unique_ptr<google::api::expr::runtime::CelExpressionBuilder> builder =
       google::api::expr::runtime::CreateCelExpressionBuilder();
@@ -61,6 +62,7 @@ void Filter::log(const ::Envoy::Http::HeaderMap* request_headers,
     return;
   }
   auto cel_expression = std::move(cel_expression_status.ValueOrDie());
+  /* end of block */
 
   google::api::expr::runtime::Activation activation;
   google::protobuf::Arena arena;
