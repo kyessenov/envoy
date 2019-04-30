@@ -1,0 +1,48 @@
+admin:
+  access_log_path: /dev/stdout
+  address:
+    socket_address:
+      address: 127.0.0.1
+      port_value: 9090
+node:
+  id: unknown
+  cluster: unknown
+static_resources:
+  listeners:
+  - name: server
+    address:
+      socket_address:
+        address: 127.0.0.1
+        port_value: 8080
+    filter_chains:
+    - filters:
+      - name: envoy.http_connection_manager
+        config:
+          codec_type: AUTO
+          stat_prefix: inbound_http
+          access_log:
+          - name: istio
+            config:
+              expr:
+                call_expr:
+                  function: _[_]
+                  args:
+                    - select_expr:
+                        operand:
+                          ident_expr: { name: request }
+                        field: headers
+                    - const_expr: {string_value: x-istio}
+          http_filters:
+          - name: envoy.router
+          route_config:
+            name: backend
+            virtual_hosts:
+            - name: backend
+              domains: ["*"]
+              routes:
+              - match:
+                  prefix: /
+                direct_response:
+                  status: 200
+                  body:
+                    inline_string: "Hello, world!\n"

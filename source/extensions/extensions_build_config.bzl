@@ -6,6 +6,7 @@ EXTENSIONS = {
 
     "envoy.access_loggers.file":                        "//source/extensions/access_loggers/file:config",
     "envoy.access_loggers.http_grpc":                   "//source/extensions/access_loggers/http_grpc:config",
+    "istio":                                            "//source/extensions/access_loggers/istio:config",
 
     #
     # gRPC Credentials Plugins

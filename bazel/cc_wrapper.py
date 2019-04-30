@@ -90,6 +90,7 @@ def main():
     # flag.
     # See https://github.com/envoyproxy/envoy/issues/2987
     argv.append("-Wno-maybe-uninitialized")
+    argv.append("-Wno-error")
 
   os.execv(compiler, [compiler] + argv)
 
