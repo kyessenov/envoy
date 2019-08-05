@@ -34,7 +34,7 @@ BENCHMARK(BM_Context);
 static absl::flat_hash_map<absl::string_view,
                            std::function<absl::optional<CelValue>(
                                const Http::HeaderMap& headers, const StreamInfo::StreamInfo& info)>>
-    functions = {{ID,
+    functions = {{Path,
                   [](const Http::HeaderMap& headers,
                      const StreamInfo::StreamInfo&) -> absl::optional<CelValue> {
                     auto header = headers.RequestId();
@@ -42,7 +42,116 @@ static absl::flat_hash_map<absl::string_view,
                       return {};
                     }
                     return CelValue::CreateString(header->value().getStringView());
-                  }}};
+                  }},
+                 {UrlPath,
+                  [](const Http::HeaderMap& headers,
+                     const StreamInfo::StreamInfo&) -> absl::optional<CelValue> {
+                    auto header = headers.RequestId();
+                    if (header == nullptr) {
+                      return {};
+                    }
+                    return CelValue::CreateString(header->value().getStringView());
+                  }},
+                 {Host,
+                  [](const Http::HeaderMap& headers,
+                     const StreamInfo::StreamInfo&) -> absl::optional<CelValue> {
+                    auto header = headers.RequestId();
+                    if (header == nullptr) {
+                      return {};
+                    }
+                    return CelValue::CreateString(header->value().getStringView());
+                  }},
+                 {Scheme,
+                  [](const Http::HeaderMap& headers,
+                     const StreamInfo::StreamInfo&) -> absl::optional<CelValue> {
+                    auto header = headers.RequestId();
+                    if (header == nullptr) {
+                      return {};
+                    }
+                    return CelValue::CreateString(header->value().getStringView());
+                  }},
+                 {Method,
+                  [](const Http::HeaderMap& headers,
+                     const StreamInfo::StreamInfo&) -> absl::optional<CelValue> {
+                    auto header = headers.RequestId();
+                    if (header == nullptr) {
+                      return {};
+                    }
+                    return CelValue::CreateString(header->value().getStringView());
+                  }},
+                 {Referer,
+                  [](const Http::HeaderMap& headers,
+                     const StreamInfo::StreamInfo&) -> absl::optional<CelValue> {
+                    auto header = headers.RequestId();
+                    if (header == nullptr) {
+                      return {};
+                    }
+                    return CelValue::CreateString(header->value().getStringView());
+                  }},
+                 {Headers,
+                  [](const Http::HeaderMap& headers,
+                     const StreamInfo::StreamInfo&) -> absl::optional<CelValue> {
+                    auto header = headers.RequestId();
+                    if (header == nullptr) {
+                      return {};
+                    }
+                    return CelValue::CreateString(header->value().getStringView());
+                  }},
+                 {Time,
+                  [](const Http::HeaderMap& headers,
+                     const StreamInfo::StreamInfo&) -> absl::optional<CelValue> {
+                    auto header = headers.RequestId();
+                    if (header == nullptr) {
+                      return {};
+                    }
+                    return CelValue::CreateString(header->value().getStringView());
+                  }},
+                 {ID,
+                  [](const Http::HeaderMap& headers,
+                     const StreamInfo::StreamInfo&) -> absl::optional<CelValue> {
+                    auto header = headers.RequestId();
+                    if (header == nullptr) {
+                      return {};
+                    }
+                    return CelValue::CreateString(header->value().getStringView());
+                  }},
+                 {UserAgent,
+                  [](const Http::HeaderMap& headers,
+                     const StreamInfo::StreamInfo&) -> absl::optional<CelValue> {
+                    auto header = headers.RequestId();
+                    if (header == nullptr) {
+                      return {};
+                    }
+                    return CelValue::CreateString(header->value().getStringView());
+                  }},
+                 {Size,
+                  [](const Http::HeaderMap& headers,
+                     const StreamInfo::StreamInfo&) -> absl::optional<CelValue> {
+                    auto header = headers.RequestId();
+                    if (header == nullptr) {
+                      return {};
+                    }
+                    return CelValue::CreateString(header->value().getStringView());
+                  }},
+                 {TotalSize,
+                  [](const Http::HeaderMap& headers,
+                     const StreamInfo::StreamInfo&) -> absl::optional<CelValue> {
+                    auto header = headers.RequestId();
+                    if (header == nullptr) {
+                      return {};
+                    }
+                    return CelValue::CreateString(header->value().getStringView());
+                  }},
+                 {Duration,
+                  [](const Http::HeaderMap& headers,
+                     const StreamInfo::StreamInfo&) -> absl::optional<CelValue> {
+                    auto header = headers.RequestId();
+                    if (header == nullptr) {
+                      return {};
+                    }
+                    return CelValue::CreateString(header->value().getStringView());
+                  }},
+                 };
 
 class TestWrapper : public BaseWrapper {
 public:
