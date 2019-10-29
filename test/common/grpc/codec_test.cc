@@ -107,14 +107,25 @@ TEST(GrpcCodecTest, decodeInvalidFrame) {
 }
 
 TEST(GrpcCodecTest, decodeEmptyFrame) {
-  Buffer::OwnedImpl buffer("\0\0\0\0", 5);
+  helloworld::HelloRequest request;
+  request.set_name("hello");
+
+  Buffer::OwnedImpl buffer;
+  std::array<uint8_t, 5> header;
+  Encoder encoder;
+  encoder.newFrame(GRPC_FH_DEFAULT, request.ByteSize(), header);
+  buffer.add(header.data(), 5);
+  buffer.add(request.SerializeAsString());
+  buffer.add("\0\0\0\0", 5);
 
   Decoder decoder;
   std::vector<Frame> frames;
   EXPECT_TRUE(decoder.decode(buffer, frames));
 
-  EXPECT_EQ(1, frames.size());
-  EXPECT_EQ(0, frames[0].length_);
+  EXPECT_EQ(2, frames.size());
+  EXPECT_EQ(request.ByteSize(), frames[0].length_);
+  EXPECT_EQ(0, frames[1].length_);
+  EXPECT_EQ(0, frames[1].data_->length());
 }
 
 TEST(GrpcCodecTest, decodeSingleFrame) {
