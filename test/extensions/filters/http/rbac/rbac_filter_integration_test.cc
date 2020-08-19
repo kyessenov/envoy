@@ -78,6 +78,34 @@ typed_config:
           - any: true
 )EOF";
 
+const std::string RBAC_CONFIG_HEADER_MATCH_CONDITION = R"EOF(
+name: rbac
+typed_config:
+  "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
+  rules:
+    action: LOG
+    policies:
+      foo:
+        permissions:
+          - any: true
+        principals:
+          - any: true
+        condition:
+          call_expr:
+            function: _==_
+            args:
+            - select_expr:
+                operand:
+                  select_expr:
+                    operand:
+                      ident_expr:
+                        name: request
+                    field: headers
+                field: xxx
+            - const_expr:
+               string_value: yyy
+)EOF";
+
 using RBACIntegrationTest = HttpProtocolIntegrationTest;
 
 INSTANTIATE_TEST_SUITE_P(Protocols, RBACIntegrationTest,
@@ -289,6 +317,29 @@ TEST_P(RBACIntegrationTest, PathIgnoreCase) {
     ASSERT_TRUE(response->complete());
     EXPECT_EQ("200", response->headers().getStatusValue());
   }
+}
+
+TEST_P(RBACIntegrationTest, Condition) {
+  config_helper_.addFilter(RBAC_CONFIG_HEADER_MATCH_CONDITION);
+  initialize();
+
+  codec_client_ = makeHttpConnection(lookupPort("http"));
+
+  auto response = codec_client_->makeRequestWithBody(
+      Http::TestRequestHeaderMapImpl{
+          {":method", "POST"},
+          {":path", "/path"},
+          {":scheme", "http"},
+          {":authority", "host"},
+          {"xxx", "yyy"},
+      },
+      1024);
+  waitForNextUpstreamRequest();
+  upstream_request_->encodeHeaders(Http::TestResponseHeaderMapImpl{{":status", "200"}}, true);
+
+  response->waitForEndStream();
+  ASSERT_TRUE(response->complete());
+  EXPECT_EQ("200", response->headers().getStatusValue());
 }
 
 TEST_P(RBACIntegrationTest, LogConnectionAllow) {
