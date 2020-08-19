@@ -83,7 +83,6 @@ name: rbac
 typed_config:
   "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
   rules:
-    action: LOG
     policies:
       foo:
         permissions:
