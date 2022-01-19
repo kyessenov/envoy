@@ -42,14 +42,7 @@ DynamicFilterConfigProviderImplBase::DynamicFilterConfigProviderImplBase(
                      init_target_.ready();
                    }),
       last_filter_in_filter_chain_(last_filter_in_filter_chain),
-      filter_chain_type_(filter_chain_type) {
-
-  subscription_->filter_config_providers_.insert(this);
-}
-
-DynamicFilterConfigProviderImplBase::~DynamicFilterConfigProviderImplBase() {
-  subscription_->filter_config_providers_.erase(this);
-}
+      filter_chain_type_(filter_chain_type) {}
 
 void DynamicFilterConfigProviderImplBase::validateTypeUrl(const std::string& type_url) const {
   validateTypeUrlHelper(type_url, require_type_urls_);
@@ -66,8 +59,8 @@ void DynamicFilterConfigProviderImplBase::validateTerminalFilter(const std::stri
 
 FilterConfigSubscription::FilterConfigSubscription(
     const envoy::config::core::v3::ConfigSource& config_source,
-    const std::string& filter_config_name, Server::Configuration::FactoryContext& factory_context,
-    const std::string& stat_prefix,
+    const std::string& filter_config_name,
+    Server::Configuration::ServerFactoryContext& factory_context, const std::string& stat_prefix,
     FilterConfigProviderManagerImplBase& filter_config_provider_manager,
     const std::string& subscription_id)
     : Config::SubscriptionBase<envoy::config::core::v3::TypedExtensionConfig>(
@@ -115,25 +108,35 @@ void FilterConfigSubscription::onConfigUpdate(
   if (new_hash == last_config_hash_) {
     return;
   }
+
+  removeExpired();
+
   // Ensure that the filter config is valid in the filter chain context once the proto is processed.
   // Validation happens before updating to prevent a partial update application. It might be
   // possible that the providers have distinct type URL constraints.
   const auto type_url = Config::Utility::getFactoryType(filter_config.typed_config());
-  for (auto* provider : filter_config_providers_) {
-    provider->validateTypeUrl(type_url);
+  for (const auto& provider : filter_config_providers_) {
+    auto existing = provider.lock();
+    existing->validateTypeUrl(type_url);
   }
-  auto [message, factory_name, is_terminal_filter] =
-      filter_config_provider_manager_.getMessage(filter_config, factory_context_);
-  for (auto* provider : filter_config_providers_) {
-    provider->validateTerminalFilter(filter_config_name_, factory_name, is_terminal_filter);
+  auto [message, factory_name] =
+      filter_config_provider_manager_.getMessageAndFactory(filter_config, factory_context_);
+  const bool is_terminal_filter = false;
+  for (const auto& provider : filter_config_providers_) {
+    auto existing = provider.lock();
+    existing->validateTerminalFilter(filter_config_name_, factory_name, is_terminal_filter);
   }
   ENVOY_LOG(debug, "Updating filter config {}", filter_config_name_);
 
-  Common::applyToAllWithCleanup<DynamicFilterConfigProviderImplBase*>(
+  Common::applyToAllWithCleanup<const std::weak_ptr<DynamicFilterConfigProviderImplBase>&>(
       filter_config_providers_,
-      [&message = message, &version_info](DynamicFilterConfigProviderImplBase* provider,
-                                          std::shared_ptr<Cleanup> cleanup) {
-        provider->onConfigUpdate(*message, version_info, [cleanup] {});
+      [&message = message,
+       &version_info](const std::weak_ptr<DynamicFilterConfigProviderImplBase>& provider,
+                      std::shared_ptr<Cleanup> cleanup) {
+        auto existing = provider.lock();
+        if (existing) {
+          existing->onConfigUpdate(*message, version_info, [cleanup] {});
+        }
       },
       [this]() { stats_.config_reload_.inc(); });
   last_config_hash_ = new_hash;
@@ -150,10 +153,14 @@ void FilterConfigSubscription::onConfigUpdate(
   if (!removed_resources.empty()) {
     ASSERT(removed_resources.size() == 1);
     ENVOY_LOG(debug, "Removing filter config {}", filter_config_name_);
-    Common::applyToAllWithCleanup<DynamicFilterConfigProviderImplBase*>(
+    Common::applyToAllWithCleanup<const std::weak_ptr<DynamicFilterConfigProviderImplBase>&>(
         filter_config_providers_,
-        [](DynamicFilterConfigProviderImplBase* provider, std::shared_ptr<Cleanup> cleanup) {
-          provider->onConfigRemoved([cleanup] {});
+        [](const std::weak_ptr<DynamicFilterConfigProviderImplBase>& provider,
+           std::shared_ptr<Cleanup> cleanup) {
+          auto existing = provider.lock();
+          if (existing) {
+            existing->onConfigRemoved([cleanup] {});
+          }
         },
         [this]() { stats_.config_reload_.inc(); });
 
@@ -184,9 +191,10 @@ FilterConfigSubscription::~FilterConfigSubscription() {
 
 void FilterConfigSubscription::incrementConflictCounter() { stats_.config_conflict_.inc(); }
 
-std::shared_ptr<FilterConfigSubscription> FilterConfigProviderManagerImplBase::getSubscription(
+std::shared_ptr<FilterConfigSubscription>
+FilterConfigProviderManagerImplBase::getOrCreateSubscription(
     const envoy::config::core::v3::ConfigSource& config_source, const std::string& name,
-    Server::Configuration::FactoryContext& factory_context, const std::string& stat_prefix) {
+    Server::Configuration::ServerFactoryContext& factory_context, const std::string& stat_prefix) {
   // FilterConfigSubscriptions are unique based on their config source and filter config name
   // combination.
   // TODO(https://github.com/envoyproxy/envoy/issues/11967) Hash collision can cause subscription
@@ -239,18 +247,18 @@ void FilterConfigProviderManagerImplBase::applyLastOrDefaultConfig(
   }
 }
 
-std::tuple<ProtobufTypes::MessagePtr, std::string, bool>
-HttpFilterConfigProviderManagerImpl::getMessage(
+std::tuple<ProtobufTypes::MessagePtr, std::string>
+HttpFilterConfigProviderManagerImpl::getMessageAndFactory(
     const envoy::config::core::v3::TypedExtensionConfig& filter_config,
-    Server::Configuration::FactoryContext& factory_context) const {
+    Server::Configuration::ServerFactoryContext& factory_context) const {
   auto& factory =
       Config::Utility::getAndCheckFactory<Server::Configuration::NamedHttpFilterConfigFactory>(
           filter_config);
   ProtobufTypes::MessagePtr message = Config::Utility::translateAnyToFactoryConfig(
       filter_config.typed_config(),
       factory_context.messageValidationContext().dynamicValidationVisitor(), factory);
-  bool is_terminal_filter = factory.isTerminalFilterByProto(*message, factory_context);
-  return {std::move(message), factory.name(), is_terminal_filter};
+  // bool is_terminal_filter = factory.isTerminalFilterByProto(*message, factory_context);
+  return {std::move(message), factory.name()};
 }
 
 ProtobufTypes::MessagePtr HttpFilterConfigProviderManagerImpl::getDefaultConfig(

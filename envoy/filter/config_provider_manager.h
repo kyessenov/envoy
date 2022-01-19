@@ -15,9 +15,12 @@ using FilterConfigProvider = Envoy::Config::ExtensionConfigProvider<FactoryCb>;
 template <class FactoryCb>
 using FilterConfigProviderPtr = std::unique_ptr<FilterConfigProvider<FactoryCb>>;
 template <class FactoryCb>
+using FilterConfigProviderSharedPtr = std::shared_ptr<FilterConfigProvider<FactoryCb>>;
+template <class FactoryCb>
 using DynamicFilterConfigProvider = Envoy::Config::DynamicExtensionConfigProvider<FactoryCb>;
 template <class FactoryCb>
-using DynamicFilterConfigProviderPtr = std::unique_ptr<DynamicFilterConfigProvider<FactoryCb>>;
+using DynamicFilterConfigProviderSharedPtr =
+    std::shared_ptr<DynamicFilterConfigProvider<FactoryCb>>;
 
 /**
  * The FilterConfigProviderManager exposes the ability to get an FilterConfigProvider
@@ -28,7 +31,7 @@ public:
   virtual ~FilterConfigProviderManager() = default;
 
   /**
-   * Get an FilterConfigProviderPtr for a filter config. The config providers may share
+   * Get an FilterConfigProviderSharedPtr for a filter config. The config providers may share
    * the underlying subscriptions to the filter config discovery service.
    * @param config_source supplies the extension configuration source for the filter configs.
    * @param filter_config_name the filter config resource name.
@@ -38,7 +41,7 @@ public:
    * configured chain
    * @param filter_chain_type is the filter chain type
    */
-  virtual DynamicFilterConfigProviderPtr<FactoryCb> createDynamicFilterConfigProvider(
+  virtual DynamicFilterConfigProviderSharedPtr<FactoryCb> createDynamicFilterConfigProvider(
       const envoy::config::core::v3::ExtensionConfigSource& config_source,
       const std::string& filter_config_name, Server::Configuration::FactoryContext& factory_context,
       const std::string& stat_prefix, bool last_filter_in_filter_chain,
