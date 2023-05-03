@@ -17,8 +17,20 @@ parameters:
 - name: bazelBuildExtraOptions
   type: string
   default: "--flaky_test_attempts=2"
+# Unfortunately, AZP is an unmittigated and undocumented disaster.
+# The definition of primitive types is close to pointless, as depending
+# on where things are set, azp just turns them into strings anyway.
+- name: repoFetchDepth
+  type: string
+  default: 1
+- name: repoFetchTags
+  type: string
+  default: false
 
 steps:
+- checkout: self
+  fetchDepth: ${{ parameters.repoFetchDepth }}
+  fetchTags: ${{ parameters.repoFetchTags }}
 # Set up tmpfs directories for self-hosted agents which have a surplus of mem.
 #
 # NB: Do not add any directory that grow larger than spare memory capacity!
@@ -65,6 +77,10 @@ steps:
     SLACK_TOKEN: $(SLACK_TOKEN)
     REPO_URI: $(Build.Repository.Uri)
     BUILD_URI: $(Build.BuildUri)
+    ${{ if eq(variables['Build.Reason'], 'PullRequest') }}:
+      AZP_TARGET_BRANCH: "origin/$(System.PullRequest.TargetBranch)"
+    ${{ if ne(variables['Build.Reason'], 'PullRequest') }}:
+      AZP_TARGET_BRANCH: "origin/$(Build.SourceBranchName)"
     ${{ if parameters.rbe }}:
       GCP_SERVICE_ACCOUNT_KEY: $(GcpServiceAccountKey)
       ENVOY_RBE: "1"
@@ -100,3 +116,10 @@ steps:
     pathtoPublish: "$(Build.StagingDirectory)/envoy"
     artifactName: ${{ parameters.ciTarget }}${{ parameters.artifactSuffix }}
   condition: always()
+
+- task: PublishBuildArtifacts@1
+  inputs:
+    pathtoPublish: "$(Build.StagingDirectory)/tmp/lint-fixes"
+    artifactName: "${{ parameters.ciTarget }}.fixes"
+  timeoutInMinutes: 10
+  condition: failed()
