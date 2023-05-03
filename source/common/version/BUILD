@@ -71,7 +71,6 @@ envoy_cc_library(
         "//source/common/common:macros",
         "//source/common/protobuf:utility_lib",
     ],
-    external_deps = ["ssl"],
 )
 
 envoy_cc_library(
