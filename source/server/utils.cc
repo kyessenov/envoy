@@ -65,7 +65,11 @@ public:
   // FormatterProvider
   absl::optional<std::string> formatWithContext(const Formatter::Context& ctx,
                                                 const StreamInfo::StreamInfo&) const override {
-    return std::string(field_extractor_(*ctx.typedExtension<LogExtension>()));
+    const auto field = field_extractor_(*ctx.typedExtension<LogExtension>());
+    if (field.empty()) {
+      return {};
+    }
+    return field;
   }
   Protobuf::Value formatValueWithContext(const Formatter::Context& ctx,
                                          const StreamInfo::StreamInfo& stream_info) const override {
