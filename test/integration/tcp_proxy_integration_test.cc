@@ -385,6 +385,7 @@ TEST_P(TcpProxyIntegrationTest, AccessLogBytesMeter) {
   config_helper_.addConfigModifier([&](envoy::config::bootstrap::v3::Bootstrap& bootstrap) -> void {
     auto* listener = bootstrap.mutable_static_resources()->mutable_listeners(0);
     listener->mutable_access_log_options()->set_flush_access_log_on_start(true);
+    listener->mutable_access_log_options()->set_flush_access_log_on_transport_connected(true);
     auto* filter_chain = listener->mutable_filter_chains(0);
     auto* config_blob = filter_chain->mutable_filters(0)->mutable_typed_config();
 
@@ -461,7 +462,7 @@ TEST_P(TcpProxyIntegrationTest, AccessLogBytesMeter) {
                                        ip_port_regex, ip_regex)));
 
   auto listener_log_result = waitForAccessLog(listener_access_log_name_);
-  EXPECT_THAT(listener_log_result, MatchesRegex(fmt::format("TcpConnectionStart TcpConnectionEnd "
+  EXPECT_THAT(listener_log_result, MatchesRegex(fmt::format("TcpConnectionStart TcpTransportConnected TcpConnectionEnd "
                                                             "\r?.*")));
 }
 

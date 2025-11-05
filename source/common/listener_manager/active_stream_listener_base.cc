@@ -122,7 +122,11 @@ ActiveTcpConnection::~ActiveTcpConnection() {
 
 void ActiveTcpConnection::onEvent(Network::ConnectionEvent event) {
   ENVOY_CONN_LOG(trace, "tcp connection on event {}", *connection_, static_cast<int>(event));
-  // Any event leads to destruction of the connection.
+  if (event == Network::ConnectionEvent::Connected) {
+    ActiveStreamListenerBase::emitLogs(*active_connections_.listener_.config_, *stream_info_,
+                                       AccessLog::AccessLogType::TcpTransportConnected);
+  }
+  // Any close event leads to destruction of the connection.
   if (event == Network::ConnectionEvent::LocalClose ||
       event == Network::ConnectionEvent::RemoteClose) {
     stream_info_->setDownstreamTransportFailureReason(connection_->transportFailureReason());

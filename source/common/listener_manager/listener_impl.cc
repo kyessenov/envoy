@@ -319,6 +319,7 @@ ListenerImpl::ListenerImpl(const envoy::config::listener::v3::Listener& config,
           parent_.factory_->createDrainManager(config.drain_type()))),
       reuse_port_(getReusePortOrDefault(parent_.server_, config, socket_type_)),
       flush_logs_on_start_(config.access_log_options().flush_access_log_on_start()),
+      flush_logs_on_connected_(config.access_log_options().flush_access_log_on_transport_connected()),
       cx_limit_runtime_key_("envoy.resource_limits.listener." + config.name() +
                             ".connection_limit"),
       open_connections_(std::make_shared<BasicResourceLimitImpl>(
@@ -464,6 +465,7 @@ ListenerImpl::ListenerImpl(ListenerImpl& origin,
           addresses_, origin.listener_factory_context_->parentFactoryContext(), initManager(),
           *origin.filter_chain_manager_)),
       reuse_port_(origin.reuse_port_), flush_logs_on_start_(origin.flush_logs_on_start_),
+      flush_logs_on_connected_(origin.flush_logs_on_connected_),
       local_init_watcher_(fmt::format("Listener-local-init-watcher {}", name),
                           [this] {
                             ASSERT(workers_started_);

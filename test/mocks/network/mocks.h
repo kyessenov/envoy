@@ -531,6 +531,7 @@ public:
   }
 
   MOCK_METHOD(bool, flushAccessLogsOnStart, (), (const));
+  MOCK_METHOD(bool, flushAccessLogsOnConnected, (), (const));
 
   const ListenerInfoConstSharedPtr& listenerInfo() const override { return listener_info_; }
 

@@ -133,6 +133,8 @@ message Listener {
   message AccessLogOptions {
     // If set to true, the access log is flushed when a TCP connection starts.
     bool flush_access_log_on_start = 1;
+    // If set to true, the access log is flushed when the transport socket becomes ready, e.g. when a TLS handshake succeeds.
+    bool flush_access_log_on_transport_connected = 2;
   }
 
   reserved 14, 23;

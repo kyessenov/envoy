@@ -967,6 +967,7 @@ private:
       return empty_access_logs_;
     }
     bool flushAccessLogsOnStart() const override { return false; }
+    bool flushAccessLogsOnConnected() const override { return false; }
     const Network::ListenerInfoConstSharedPtr& listenerInfo() const override {
       return listener_info_;
     }

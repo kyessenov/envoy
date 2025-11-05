@@ -48,7 +48,8 @@ MockListenerConfig::MockListenerConfig()
       .WillByDefault(Return(Network::DefaultMaxConnectionsToAcceptPerSocketEvent));
   ON_CALL(*this, ignoreGlobalConnLimit()).WillByDefault(Return(false));
   ON_CALL(*this, bindToPort()).WillByDefault(Return(true));
-  ON_CALL(*this, flushAccessLogsOnStart()).WillByDefault(Return(true));
+  ON_CALL(*this, flushAccessLogsOnStart()).WillByDefault(Return(false));
+  ON_CALL(*this, flushAccessLogsOnConnected()).WillByDefault(Return(false));
 }
 MockListenerConfig::~MockListenerConfig() = default;
 

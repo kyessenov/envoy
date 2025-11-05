@@ -321,6 +321,7 @@ public:
   ResourceLimit& openConnections() override { return *open_connections_; }
   const AccessLog::InstanceSharedPtrVector& accessLogs() const override { return access_logs_; }
   bool flushAccessLogsOnStart() const override { return flush_logs_on_start_; }
+  bool flushAccessLogsOnConnected() const override { return flush_logs_on_connected_; }
   uint32_t tcpBacklogSize() const override { return tcp_backlog_size_; }
   uint32_t maxConnectionsToAcceptPerSocketEvent() const override {
     return max_connections_to_accept_per_socket_event_;
@@ -484,8 +485,9 @@ private:
   absl::flat_hash_map<std::string, Network::ConnectionBalancerSharedPtr> connection_balancers_;
   std::shared_ptr<PerListenerFactoryContextImpl> listener_factory_context_;
   std::unique_ptr<FilterChainManagerImpl> filter_chain_manager_;
-  const bool reuse_port_;
-  const bool flush_logs_on_start_;
+  const bool reuse_port_ : 1;
+  const bool flush_logs_on_start_ : 1;
+  const bool flush_logs_on_connected_ : 1;
 
   // Per-listener connection limits are only specified via runtime.
   //
