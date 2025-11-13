@@ -49,6 +49,11 @@ public:
    * nullptr if the provider isn't dynamic.
    */
   virtual const Init::Target* initTarget() { return nullptr; }
+
+  /**
+   * @return true if the provider does not block the parent resource readiness.
+   */
+  virtual bool applyWithoutWarming() const PURE;
 };
 
 using TlsCertificatePtr =

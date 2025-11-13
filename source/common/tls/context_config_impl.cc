@@ -71,7 +71,8 @@ std::vector<TlsCertificateConfigProviderSharedPtrWithName> getTlsCertificateConf
                 .secretManager()
                 .findOrCreateTlsCertificateProvider(
                     sds_secret_config.sds_config(), sds_secret_config.name(),
-                    factory_context.serverFactoryContext(), factory_context.initManager())});
+                    factory_context.serverFactoryContext(), factory_context.initManager(),
+                    sds_secret_config.apply_without_warming())});
       } else {
         // Load static secret.
         auto secret_provider =
@@ -96,12 +97,16 @@ Secret::CertificateValidationContextConfigProviderSharedPtr getProviderFromSds(
     const envoy::extensions::transport_sockets::tls::v3::SdsSecretConfig& sds_secret_config,
     absl::Status& creation_status) {
   if (sds_secret_config.has_sds_config()) {
+    if (sds_secret_config.apply_without_warming()) {
+      creation_status = absl::InvalidArgumentError("Warming is required for the SDS resource.");
+      return nullptr;
+    }
     // Fetch dynamic secret.
     return factory_context.serverFactoryContext()
         .secretManager()
         .findOrCreateCertificateValidationContextProvider(
             sds_secret_config.sds_config(), sds_secret_config.name(),
-            factory_context.serverFactoryContext(), factory_context.initManager());
+            factory_context.serverFactoryContext(), factory_context.initManager(), false);
   } else {
     // Load static secret.
     auto secret_provider =
@@ -261,6 +266,8 @@ ContextConfigImpl::ContextConfigImpl(
             *provider.provider_->secret(), factory_context, api_, provider.certificate_name_);
         SET_AND_RETURN_IF_NOT_OK(config_or_error.status(), creation_status);
         tls_certificate_configs_.emplace_back(std::move(*config_or_error));
+      } else if (provider.provider_->applyWithoutWarming()) {
+        warming_ = true;
       }
     }
   }
@@ -307,6 +314,7 @@ void ContextConfigImpl::setSecretUpdateCallback(std::function<absl::Status()> ca
     tc_update_callback_handles_.push_back(
         tls_certificate_provider.provider_->addUpdateCallback([this, callback]() {
           tls_certificate_configs_.clear();
+          bool warmed = true;
           for (const auto& tls_certificate_provider : tls_certificate_providers_) {
             auto* secret = tls_certificate_provider.provider_->secret();
             if (secret != nullptr) {
@@ -314,7 +322,12 @@ void ContextConfigImpl::setSecretUpdateCallback(std::function<absl::Status()> ca
                   *secret, factory_context_, api_, tls_certificate_provider.certificate_name_);
               RETURN_IF_NOT_OK(config_or_error.status());
               tls_certificate_configs_.emplace_back(std::move(*config_or_error));
+            } else if (warmed && tls_certificate_provider.provider_->applyWithoutWarming()) {
+              warmed = false;
             }
+          }
+          if (warming_ && warmed) {
+            warming_ = false;
           }
           return callback();
         }));

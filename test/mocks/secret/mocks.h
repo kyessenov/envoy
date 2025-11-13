@@ -42,20 +42,20 @@ public:
               (const envoy::extensions::transport_sockets::tls::v3::GenericSecret& generic_secret));
   MOCK_METHOD(TlsCertificateConfigProviderSharedPtr, findOrCreateTlsCertificateProvider,
               (const envoy::config::core::v3::ConfigSource&, const std::string&,
-               Server::Configuration::ServerFactoryContext&, Init::Manager& init_manager));
+               Server::Configuration::ServerFactoryContext&, Init::Manager& init_manager, bool apply_without_warming));
   MOCK_METHOD(CertificateValidationContextConfigProviderSharedPtr,
               findOrCreateCertificateValidationContextProvider,
               (const envoy::config::core::v3::ConfigSource& config_source,
                const std::string& config_name,
                Server::Configuration::ServerFactoryContext& server_context,
-               Init::Manager& init_manager));
+               Init::Manager& init_manager, bool apply_without_warming));
   MOCK_METHOD(TlsSessionTicketKeysConfigProviderSharedPtr,
               findOrCreateTlsSessionTicketKeysContextProvider,
               (const envoy::config::core::v3::ConfigSource&, const std::string&,
-               Server::Configuration::ServerFactoryContext&, Init::Manager& init_manager));
+               Server::Configuration::ServerFactoryContext&, Init::Manager& init_manager, bool apply_without_warming));
   MOCK_METHOD(GenericSecretConfigProviderSharedPtr, findOrCreateGenericSecretProvider,
               (const envoy::config::core::v3::ConfigSource&, const std::string&,
-               Server::Configuration::ServerFactoryContext&, Init::Manager& init_manager));
+               Server::Configuration::ServerFactoryContext&, Init::Manager& init_manager, bool apply_without_warming));
 };
 
 class MockSecretCallbacks : public SecretCallbacks {

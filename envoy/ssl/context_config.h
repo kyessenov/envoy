@@ -72,10 +72,15 @@ public:
   virtual unsigned maxProtocolVersion() const PURE;
 
   /**
+   * @return true if the ContextConfig is able to create TLS sockets.
+   */
+  virtual bool isReady() const PURE;
+
+  /**
    * @return true if the ContextConfig is able to provide secrets to create SSL context,
    * and false if dynamic secrets are expected but are not downloaded from SDS server yet.
    */
-  virtual bool isReady() const PURE;
+  virtual bool certificatesReady() const PURE;
 
   /**
    * Add secret callback into context config. When dynamic secrets are in use and new secrets

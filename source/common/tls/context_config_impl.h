@@ -65,13 +65,17 @@ public:
   }
 
   bool isReady() const override {
-    const bool tls_is_ready =
+    const bool tls_is_ready = warming_ ||
         (tls_certificate_providers_.empty() || !tls_certificate_configs_.empty());
     const bool combined_cvc_is_ready =
         (default_cvc_ == nullptr || validation_context_config_ != nullptr);
     const bool cvc_is_ready = (certificate_validation_context_provider_.provider_ == nullptr ||
                                default_cvc_ != nullptr || validation_context_config_ != nullptr);
     return tls_is_ready && combined_cvc_is_ready && cvc_is_ready;
+  }
+
+  bool certificatesReady() const override {
+    return !warming_;
   }
 
   void setSecretUpdateCallback(std::function<absl::Status()> callback) override;
@@ -135,6 +139,7 @@ private:
   const absl::optional<
       envoy::extensions::transport_sockets::tls::v3::TlsParameters::CompliancePolicy>
       compliance_policy_;
+  bool warming_{false};
 };
 
 class ClientContextConfigImpl : public ContextConfigImpl, public Envoy::Ssl::ClientContextConfig {

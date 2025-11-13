@@ -106,6 +106,7 @@ ServerContextImpl::ServerContextImpl(Stats::Scope& scope,
   if (!creation_status.ok()) {
     return;
   }
+
   // If creation failed, do not create the selector.
   tls_certificate_selector_ = config.tlsCertificateSelectorFactory()(config, *this);
 

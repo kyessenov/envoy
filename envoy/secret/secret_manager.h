@@ -103,13 +103,14 @@ public:
    * @param config_name a name that uniquely refers to the SDS config source.
    * @param secret_provider_context context that provides components for creating and initializing
    * secret provider.
+   * @param apply_without_warming If set, do not block parent resource from initializing.
    * @return TlsCertificateConfigProviderSharedPtr the dynamic TLS secret provider.
    */
   virtual TlsCertificateConfigProviderSharedPtr
   findOrCreateTlsCertificateProvider(const envoy::config::core::v3::ConfigSource& config_source,
                                      const std::string& config_name,
                                      Server::Configuration::ServerFactoryContext& server_context,
-                                     Init::Manager& init_manager) PURE;
+                                     Init::Manager& init_manager, bool apply_without_warming) PURE;
 
   /**
    * Finds and returns a dynamic secret provider associated to SDS config. Create
@@ -119,6 +120,7 @@ public:
    * @param config_name a name that uniquely refers to the SDS config source.
    * @param secret_provider_context context that provides components for creating and initializing
    * secret provider.
+   * @param apply_without_warming If set, do not block parent resource from initializing.
    * @return CertificateValidationContextConfigProviderSharedPtr the dynamic certificate validation
    * context secret provider.
    */
@@ -126,7 +128,7 @@ public:
   findOrCreateCertificateValidationContextProvider(
       const envoy::config::core::v3::ConfigSource& config_source, const std::string& config_name,
       Server::Configuration::ServerFactoryContext& server_context,
-      Init::Manager& init_manager) PURE;
+      Init::Manager& init_manager, bool apply_without_warming) PURE;
 
   /**
    * Finds and returns a dynamic secret provider associated to SDS config. Create
@@ -136,6 +138,7 @@ public:
    * @param config_name a name that uniquely refers to the SDS config source.
    * @param secret_provider_context context that provides components for creating and initializing
    * secret provider.
+   * @param apply_without_warming If set, do not block parent resource from initializing.
    * @return TlsSessionTicketKeysConfigProviderSharedPtr the dynamic tls session ticket keys secret
    * provider.
    */
@@ -143,7 +146,7 @@ public:
   findOrCreateTlsSessionTicketKeysContextProvider(
       const envoy::config::core::v3::ConfigSource& config_source, const std::string& config_name,
       Server::Configuration::ServerFactoryContext& server_context,
-      Init::Manager& init_manager) PURE;
+      Init::Manager& init_manager, bool apply_without_warming) PURE;
 
   /**
    * Finds and returns a dynamic secret provider associated to SDS config. Create a new one if such
@@ -153,13 +156,14 @@ public:
    * @param config_name a name that uniquely refers to the SDS config source.
    * @param secret_provider_context context that provides components for creating and initializing
    * secret provider.
+   * @param apply_without_warming If set, do not block parent resource from initializing.
    * @return GenericSecretConfigProviderSharedPtr the dynamic generic secret provider.
    */
   virtual GenericSecretConfigProviderSharedPtr
   findOrCreateGenericSecretProvider(const envoy::config::core::v3::ConfigSource& config_source,
                                     const std::string& config_name,
                                     Server::Configuration::ServerFactoryContext& server_context,
-                                    Init::Manager& init_manager) PURE;
+                                    Init::Manager& init_manager, bool apply_without_warming) PURE;
 };
 
 using SecretManagerPtr = std::unique_ptr<SecretManager>;

@@ -40,12 +40,16 @@ Secret::TlsSessionTicketKeysConfigProviderSharedPtr getTlsSessionTicketKeysConfi
       SessionTicketKeysTypeCase::kSessionTicketKeysSdsSecretConfig: {
     const auto& sds_secret_config = config.session_ticket_keys_sds_secret_config();
     if (sds_secret_config.has_sds_config()) {
+      if (sds_secret_config.apply_without_warming()) {
+        creation_status = absl::InvalidArgumentError("Warming is required for the SDS resource.");
+        return nullptr;
+      }
       // Fetch dynamic secret.
       return factory_context.serverFactoryContext()
           .secretManager()
           .findOrCreateTlsSessionTicketKeysContextProvider(
               sds_secret_config.sds_config(), sds_secret_config.name(),
-              factory_context.serverFactoryContext(), factory_context.initManager());
+              factory_context.serverFactoryContext(), factory_context.initManager(), false);
     } else {
       // Load static secret.
       auto secret_provider =
