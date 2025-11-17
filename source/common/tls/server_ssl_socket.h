@@ -60,6 +60,7 @@ private:
   const std::vector<std::string> server_names_;
   mutable absl::Mutex ssl_ctx_mu_;
   Envoy::Ssl::ServerContextSharedPtr ssl_ctx_ ABSL_GUARDED_BY(ssl_ctx_mu_);
+  absl::flat_hash_map<Ssl::ServerContext*, std::weak_ptr<Ssl::ServerContext>> pending_contexts_ ABSL_GUARDED_BY(ssl_ctx_mu_);
 };
 
 } // namespace Tls

@@ -180,22 +180,6 @@ public:
   virtual SslCtxCb sslctxCb(HandshakerFactoryContext& handshaker_factory_context) const PURE;
 };
 
-struct SelectionResult {
-  enum class SelectionStatus {
-    // A certificate was successfully selected.
-    Success,
-    // Certificate selection will complete asynchronously later.
-    Pending,
-    // Certificate selection failed.
-    Failed,
-  };
-  SelectionStatus status; // Status of the certificate selection.
-  // Selected TLS context which it only be non-null when status is Success.
-  const Ssl::TlsContext* selected_ctx;
-  // True if OCSP stapling should be enabled.
-  bool staple;
-};
-
 /**
  * Used to return the result from an asynchronous cert selection.
  */
@@ -215,6 +199,24 @@ public:
 };
 
 using CertificateSelectionCallbackPtr = std::unique_ptr<CertificateSelectionCallback>;
+
+struct SelectionResult {
+  enum class SelectionStatus {
+    // A certificate was successfully selected.
+    Success,
+    // Certificate selection will complete asynchronously later.
+    Pending,
+    // Certificate selection failed.
+    Failed,
+  };
+  SelectionStatus status; // Status of the certificate selection.
+  // Selected TLS context which it only be non-null when status is Success.
+  const Ssl::TlsContext* selected_ctx {nullptr};
+  // True if OCSP stapling should be enabled.
+  bool staple {false};
+  // Returns the callback when the selection status is not Pending.
+  CertificateSelectionCallbackPtr cb_{nullptr};
+};
 
 enum class OcspStapleAction { Staple, NoStaple, Fail, ClientNotCapable };
 
@@ -236,7 +238,7 @@ public:
    *
    * @return context will have the same lifetime as ``ServerContextImpl``.
    */
-  virtual std::pair<const Ssl::TlsContext&, OcspStapleAction>
+  virtual absl::optional<std::pair<const Ssl::TlsContext&, OcspStapleAction>>
   findTlsContext(absl::string_view sni, const CurveNIDVector& client_ecdsa_capabilities,
                  bool client_ocsp_capable, bool* cert_matched_sni) PURE;
 };

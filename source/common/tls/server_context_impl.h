@@ -57,6 +57,35 @@ public:
   // The returned vector has the same life-time as the Ssl::TlsCertificateSelectorContext.
   const std::vector<Ssl::TlsContext>& getTlsContexts() const override { return tls_contexts_; };
 
+  // Ssl::ServerContext
+  void notifyCertificatesReady(Ssl::ServerContextSharedPtr active_ctx) override {
+    ENVOY_LOG(info, "Waking context to resume certificate selection");
+    if (async_state_) {
+      async_state_->active_ctx_ = active_ctx;
+      for (auto& [dispatcher, cbs] : async_state_->callbacks_) {
+        dispatcher->post([active_ctx, cbs = std::move(cbs)] () mutable {
+          for (auto& [client_hello, cb] : cbs) {
+          /*
+            const auto result = active_ctx->certificateSelector().selectTlsContext(client_hello, std::move(cb));
+            if (result.status != Ssl::SelectionResult::SelectionStatus::Pending) {
+              OptRef<const Ssl::TlsContext> tls_ctx;
+              if (result.status == Ssl::SelectionResult::SelectionStatus::Success) {
+                tls_ctx.emplace(*result.selected_ctx);
+              }
+            }
+          */
+            OptRef<const Ssl::TlsContext> tls_ctx = dynamic_cast<ServerContextImpl*>(active_ctx.get())->getTlsContexts()[0];
+            cb->onCertificateSelectionResult(tls_ctx, false);
+          }
+        });
+      }
+      async_state_->callbacks_.clear();
+    }
+  }
+  Ssl::TlsCertificateSelector& certificateSelector() const override {
+    return *tls_certificate_selector_;
+  }
+
   // Select the TLS certificate context in SSL_CTX_set_select_certificate_cb() callback with
   // ClientHello details. This is made public for use by custom TLS extensions who want to
   // manually create and use this as a client hello callback.
@@ -64,7 +93,7 @@ public:
 
   // Finds the best matching context. The returned context will have the same lifetime as
   // this ``ServerContextImpl``.
-  std::pair<const Ssl::TlsContext&, Ssl::OcspStapleAction>
+  absl::optional<std::pair<const Ssl::TlsContext&, Ssl::OcspStapleAction>>
   findTlsContext(absl::string_view sni, const Ssl::CurveNIDVector& client_ecdsa_capable,
                  bool client_ocsp_capable, bool* cert_matched_sni);
 
@@ -89,6 +118,44 @@ private:
   Ssl::TlsCertificateSelectorPtr tls_certificate_selector_;
   const std::vector<Envoy::Ssl::ServerContextConfig::SessionTicketKey> session_ticket_keys_;
   const Ssl::ServerContextConfig::OcspStaplePolicy ocsp_staple_policy_;
+
+  // Captured async callbacks together with the active context once available.
+  struct AsyncState {
+    Ssl::ServerContextSharedPtr active_ctx_;
+    struct SelectCapture {
+      const SSL_CLIENT_HELLO& ssl_client_hello_;
+      Ssl::CertificateSelectionCallbackPtr cb_;
+    };
+    absl::flat_hash_map<Event::Dispatcher*, std::vector<SelectCapture>> callbacks_; 
+  };
+  std::unique_ptr<AsyncState> async_state_;
+
+  // This selector pauses the handshake until the certificates are ready.
+  // It is owned by the ServerContext, which is held by multiple active ServerSslSockets on workers.
+  // (and also the socket factory on the main thread).
+  class AsyncCertificateSelector : public Ssl::TlsCertificateSelector {
+  public:
+    AsyncCertificateSelector(ServerContextImpl& parent) : parent_(parent) {
+      parent_.async_state_ = std::make_unique<AsyncState>();
+    }
+
+    Ssl::SelectionResult selectTlsContext(const SSL_CLIENT_HELLO& ssl_client_hello,
+                                          Ssl::CertificateSelectionCallbackPtr cb) override { 
+      if (parent_.async_state_->active_ctx_) {
+        return parent_.async_state_->active_ctx_->certificateSelector().selectTlsContext(ssl_client_hello, std::move(cb));
+      }
+      parent_.async_state_->callbacks_[&cb->dispatcher()].push_back({ssl_client_hello, std::move(cb)});
+      return {Ssl::SelectionResult::SelectionStatus::Pending};
+    }
+
+    absl::optional<std::pair<const Ssl::TlsContext&, Ssl::OcspStapleAction>>
+    findTlsContext(absl::string_view , const Ssl::CurveNIDVector& ,
+                   bool , bool* ) override {
+      return {};
+    }
+  private:
+    ServerContextImpl& parent_;
+  };
 };
 
 class ServerContextFactoryImpl : public ServerContextFactory {

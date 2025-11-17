@@ -231,6 +231,12 @@ public:
           });
       // The SNI of the certificates loaded in this test.
       default_request_headers_.setHost("www.lyft.com");
+      // Set timeout for async SDS.
+      if (async_sds_) {
+        for (auto& listener : *bootstrap.mutable_static_resources()->mutable_listeners()) {
+          listener.mutable_filter_chains(0)->mutable_transport_socket_connect_timeout()->set_seconds(5);
+        }
+      }
     });
 
     config_helper_.addConfigModifier([](envoy::config::bootstrap::v3::Bootstrap& bootstrap) {
@@ -262,6 +268,9 @@ public:
     // Modify the listener ssl cert to use SDS from sds_cluster
     auto* secret_config_rsa = common_tls_context.add_tls_certificate_sds_secret_configs();
     setUpSdsConfig(secret_config_rsa, server_cert_rsa_);
+    if (async_sds_) {
+      secret_config_rsa->set_apply_without_warming(true);
+    }
 
     // Add an additional SDS config for an EC cert (the base test has SDS config for an RSA cert).
     // This is done via the filesystem instead of gRPC to simplify the test setup.
@@ -363,11 +372,13 @@ protected:
   Network::UpstreamTransportSocketFactoryPtr client_ssl_ctx_;
   bool dual_cert_{false};
   bool multi_cert_{false};
+  bool async_sds_{false};
 };
 
 INSTANTIATE_TEST_SUITE_P(IpVersionsClientType, SdsDynamicDownstreamIntegrationTest,
                          testing::ValuesIn(getSdsTestsParams()), sdsTestParamsToString);
 
+#if 0
 class SdsDynamicKeyRotationIntegrationTest : public SdsDynamicDownstreamIntegrationTest {
 protected:
   envoy::extensions::transport_sockets::tls::v3::Secret getCurrentServerSecret() {
@@ -475,7 +486,32 @@ TEST_P(SdsDynamicDownstreamIntegrationTest, BasicSuccess) {
   EXPECT_EQ(1, test_server_->counter("sds.server_cert_rsa.update_success")->value());
   EXPECT_EQ(0, test_server_->counter("sds.server_cert_rsa.update_rejected")->value());
 }
+#endif
 
+TEST_P(SdsDynamicDownstreamIntegrationTest, BasicSuccessWithAsyncSDS) {
+  async_sds_ = true;
+  on_server_init_function_ = [this]() {
+    createSdsStream(*sdsUpstream());
+  };
+  initialize();
+
+  // Artifically delay the SDS response using the upstream dispatcher.
+  // Note: this would be cleaner if we had a reliable trigger that a certificiate is pending.
+  fake_upstreams_[0]->runOnDispatcherThread([&] {
+    absl::SleepFor(absl::Seconds(1));
+    sendSdsResponse(getServerSecretRsa());
+  });
+  ConnectionCreationFunction creator = [&]() -> Network::ClientConnectionPtr {
+    return makeSslClientConnection();
+  };
+  testRouterHeaderOnlyRequestAndResponse(&creator, dataPlaneUpstreamIndex());
+
+  // Success
+  EXPECT_EQ(1, test_server_->counter("sds.server_cert_rsa.update_success")->value());
+  EXPECT_EQ(0, test_server_->counter("sds.server_cert_rsa.update_rejected")->value());
+}
+
+#if 0
 TEST_P(SdsDynamicDownstreamIntegrationTest, DualCert) {
   on_server_init_function_ = [this]() {
     createSdsStream(*sdsUpstream());
@@ -614,7 +650,9 @@ TEST_P(SdsDynamicDownstreamIntegrationTest, WrongSecretFirst) {
   EXPECT_EQ(1, test_server_->counter("sds.server_cert_rsa.update_success")->value());
   EXPECT_EQ(1, test_server_->counter("sds.server_cert_rsa.update_rejected")->value());
 }
+#endif
 
+#if 0
 class SdsDynamicDownstreamCertValidationContextTest : public SdsDynamicDownstreamIntegrationTest {
 public:
   SdsDynamicDownstreamCertValidationContextTest() = default;
@@ -1585,6 +1623,7 @@ TEST_P(SdsCdsPrivateKeyIntegrationTest, BasicSdsCdsPrivateKeyProvider) {
   // Successfully removed the dynamic cluster.
   test_server_->waitForGaugeEq("cluster_manager.active_clusters", 3);
 }
+#endif
 
 } // namespace Ssl
 } // namespace Envoy

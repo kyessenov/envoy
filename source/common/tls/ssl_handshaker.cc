@@ -115,6 +115,7 @@ Ssl::CertificateSelectionCallbackPtr
 SslExtendedSocketInfoImpl::createCertificateSelectionCallback() {
   auto callback = std::make_unique<CertificateSelectionCallbackImpl>(
       ssl_handshaker_.handshakeCallbacks()->connection().dispatcher(), *this);
+  ASSERT(!cert_selection_callback_.has_value(), "There is at most one selection callback per SSL socket.");
   cert_selection_callback_ = *callback;
   cert_selection_result_ = Ssl::CertificateSelectionStatus::Pending;
   return callback;

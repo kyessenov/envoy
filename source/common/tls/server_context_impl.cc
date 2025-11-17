@@ -107,6 +107,20 @@ ServerContextImpl::ServerContextImpl(Stats::Scope& scope,
     return;
   }
 
+  if (!config.certificatesReady()) {
+    // Certificates in this context are not going to be used, since the async
+    // selector will switch to another context.
+    tls_certificate_selector_ = std::make_unique<AsyncCertificateSelector>(*this);
+    SSL_CTX_set_select_certificate_cb(
+        tls_contexts_[0].ssl_ctx_.get(),
+        [](const SSL_CLIENT_HELLO* client_hello) -> ssl_select_cert_result_t {
+          return static_cast<ServerContextImpl*>(
+                     SSL_CTX_get_app_data(SSL_get_SSL_CTX(client_hello->ssl)))
+              ->selectTlsContext(client_hello);
+        });
+    return;
+  }
+
   // If creation failed, do not create the selector.
   tls_certificate_selector_ = config.tlsCertificateSelectorFactory()(config, *this);
 
@@ -466,7 +480,7 @@ bool ServerContextImpl::isClientOcspCapable(const SSL_CLIENT_HELLO& ssl_client_h
   return false;
 }
 
-std::pair<const Ssl::TlsContext&, Ssl::OcspStapleAction>
+absl::optional<std::pair<const Ssl::TlsContext&, Ssl::OcspStapleAction>>
 ServerContextImpl::findTlsContext(absl::string_view sni,
                                   const Ssl::CurveNIDVector& client_ecdsa_capabilities,
                                   bool client_ocsp_capable, bool* cert_matched_sni) {
@@ -528,6 +542,7 @@ ServerContextImpl::selectTlsContext(const SSL_CLIENT_HELLO* ssl_client_hello) {
   }
   PANIC_DUE_TO_CORRUPT_ENUM;
 }
+
 
 absl::StatusOr<Ssl::ServerContextSharedPtr> ServerContextFactoryImpl::createServerContext(
     Stats::Scope& scope, const Envoy::Ssl::ServerContextConfig& config,

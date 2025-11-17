@@ -49,6 +49,10 @@ ServerSslSocketFactory::ServerSslSocketFactory(Envoy::Ssl::ServerContextConfigPt
   SET_AND_RETURN_IF_NOT_OK(ctx_or_error.status(), creation_status);
 
   ssl_ctx_ = *ctx_or_error;
+  if (!config_->certificatesReady()) {
+    ENVOY_LOG(info, "Certificates not ready");
+    pending_contexts_[ssl_ctx_.get()] = ssl_ctx_;
+  } 
   config_->setSecretUpdateCallback([this]() { return onAddOrUpdateSecret(); });
 }
 
@@ -84,13 +88,32 @@ absl::Status ServerSslSocketFactory::onAddOrUpdateSecret() {
   auto ctx_or_error =
       manager_.createSslServerContext(stats_scope_, *config_, server_names_, nullptr);
   RETURN_IF_NOT_OK(ctx_or_error.status());
+
+  absl::flat_hash_map<Ssl::ServerContext*, std::weak_ptr<Ssl::ServerContext>> notify_contexts;;
+  Envoy::Ssl::ServerContextSharedPtr notify_ctx;
   {
     absl::WriterMutexLock l(&ssl_ctx_mu_);
     std::swap(*ctx_or_error, ssl_ctx_);
+    if (!config_->certificatesReady()) {
+      ENVOY_LOG(info, "Certificates not ready");
+      pending_contexts_[ssl_ctx_.get()] = ssl_ctx_;
+    } else if (!pending_contexts_.empty()) {
+      ENVOY_LOG(info, "Certificates are ready, need to wake up contexts");
+      std::swap(notify_contexts, pending_contexts_);
+      notify_ctx = ssl_ctx_;
+    }
   }
   manager_.removeContext(*ctx_or_error);
-
   stats_.ssl_context_update_by_sds_.inc();
+
+  // Notify pending contexts that the certificates are ready.
+  if (!notify_contexts.empty()) {
+    for (auto [_, weak_ctx] : notify_contexts) {
+      if (auto ctx = weak_ctx.lock(); ctx) {
+        ctx->notifyCertificatesReady(notify_ctx);
+      }
+    }
+  }
   return absl::OkStatus();
 }
 

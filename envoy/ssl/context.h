@@ -48,7 +48,14 @@ using ContextSharedPtr = std::shared_ptr<Context>;
 class ClientContext : public virtual Context {};
 using ClientContextSharedPtr = std::shared_ptr<ClientContext>;
 
-class ServerContext : public virtual Context {};
+class TlsCertificateSelector;
+class ServerContext : public virtual Context {
+public:
+ ~ServerContext() override  = default;
+
+ virtual void notifyCertificatesReady(std::shared_ptr<ServerContext> active_ctx) PURE;
+ virtual TlsCertificateSelector& certificateSelector() const PURE;
+};
 using ServerContextSharedPtr = std::shared_ptr<ServerContext>;
 
 class OcspResponseWrapper {

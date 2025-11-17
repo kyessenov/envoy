@@ -86,7 +86,7 @@ void DefaultTlsCertificateSelector::populateServerNamesMap(const Ssl::TlsContext
 
 Ssl::SelectionResult
 DefaultTlsCertificateSelector::selectTlsContext(const SSL_CLIENT_HELLO& ssl_client_hello,
-                                                Ssl::CertificateSelectionCallbackPtr) {
+                                                Ssl::CertificateSelectionCallbackPtr cb) {
   absl::string_view sni =
       absl::NullSafeStringView(SSL_get_servername(ssl_client_hello.ssl, TLSEXT_NAMETYPE_host_name));
   const Ssl::CurveNIDVector client_ecdsa_capabilities =
@@ -94,7 +94,7 @@ DefaultTlsCertificateSelector::selectTlsContext(const SSL_CLIENT_HELLO& ssl_clie
   const bool client_ocsp_capable = server_ctx_.isClientOcspCapable(ssl_client_hello);
 
   auto [selected_ctx, ocsp_staple_action] =
-      findTlsContext(sni, client_ecdsa_capabilities, client_ocsp_capable, nullptr);
+      findTlsContext(sni, client_ecdsa_capabilities, client_ocsp_capable, nullptr).value();
 
   auto stats = server_ctx_.stats();
   if (client_ocsp_capable) {
@@ -110,14 +110,14 @@ DefaultTlsCertificateSelector::selectTlsContext(const SSL_CLIENT_HELLO& ssl_clie
     break;
   case Ssl::OcspStapleAction::Fail:
     stats.ocsp_staple_failed_.inc();
-    return {Ssl::SelectionResult::SelectionStatus::Failed, nullptr, false};
+    return {Ssl::SelectionResult::SelectionStatus::Failed, nullptr, false, std::move(cb)};
   case Ssl::OcspStapleAction::ClientNotCapable:
     // This happens when client does not support OCSP, do nothing.
     break;
   }
 
   return {Ssl::SelectionResult::SelectionStatus::Success, &selected_ctx,
-          ocsp_staple_action == Ssl::OcspStapleAction::Staple};
+          ocsp_staple_action == Ssl::OcspStapleAction::Staple, std::move(cb)};
 }
 
 Ssl::OcspStapleAction DefaultTlsCertificateSelector::ocspStapleAction(const Ssl::TlsContext& ctx,
@@ -162,7 +162,7 @@ Ssl::OcspStapleAction DefaultTlsCertificateSelector::ocspStapleAction(const Ssl:
   PANIC_DUE_TO_CORRUPT_ENUM;
 }
 
-std::pair<const Ssl::TlsContext&, Ssl::OcspStapleAction>
+absl::optional<std::pair<const Ssl::TlsContext&, Ssl::OcspStapleAction>>
 DefaultTlsCertificateSelector::findTlsContext(absl::string_view sni,
                                               const Ssl::CurveNIDVector& client_ecdsa_capabilities,
                                               bool client_ocsp_capable, bool* cert_matched_sni) {
@@ -278,7 +278,7 @@ DefaultTlsCertificateSelector::findTlsContext(absl::string_view sni,
   }
 
   ASSERT(selected_ctx != nullptr);
-  return {*selected_ctx, ocsp_staple_action};
+  return absl::make_optional<std::pair<const Ssl::TlsContext&, Ssl::OcspStapleAction>>({*selected_ctx, ocsp_staple_action});
 }
 
 } // namespace Tls
