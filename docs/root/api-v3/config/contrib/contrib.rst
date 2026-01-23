@@ -13,7 +13,10 @@ Contrib extensions
   hyperscan/matcher
   hyperscan/regex_engine
   dlb/dlb
+  postgres/postgres
   qat/qat
+  kae/kae
   http_tcp_bridge/http_tcp_bridge
   tap_sinks/tap_sinks
   load_balancing_policies/peak_ewma/peak_ewma
+  istio/istio

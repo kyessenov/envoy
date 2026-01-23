@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <iostream>
 #include <string>
 #include <tuple>
 
@@ -41,6 +42,7 @@ using testing::AnyNumber;
 using testing::AtLeast;
 using testing::ElementsAre;
 using testing::EndsWith;
+using testing::Eq;
 using testing::HasSubstr;
 using testing::InSequence;
 using testing::Invoke;
@@ -218,6 +220,7 @@ public:
   }
 
   void setupHttp2Overrides() {
+    scoped_runtime_.mergeValues({{"envoy.reloadable_features.reset_with_error", "true"}});
     switch (http2_implementation_) {
     case Http2Impl::Nghttp2:
       scoped_runtime_.mergeValues({{"envoy.reloadable_features.http2_use_oghttp2", "false"}});
@@ -656,6 +659,29 @@ TEST_P(Http2CodecImplTest, ShutdownNotice) {
   driveToCompletion();
 }
 
+TEST_P(Http2CodecImplTest, ProtocolStreamId) {
+  allow_metadata_ = true;
+  initialize();
+
+  std::vector<uint32_t> expected_stream_ids;
+  uint32_t expected_stream_id = 1;
+  for (int i = 0; i < 10; ++i) {
+    RequestEncoder* request_encoder =
+        i == 0 ? request_encoder_ : &client_->newStream(response_decoder_);
+    TestRequestHeaderMapImpl request_headers;
+    HttpTestUtility::addDefaultHeaders(request_headers);
+    EXPECT_CALL(request_decoder_, decodeHeaders_(_, false));
+    EXPECT_TRUE(request_encoder->encodeHeaders(request_headers, false).ok());
+    driveToCompletion();
+
+    expected_stream_ids.insert(expected_stream_ids.begin(), expected_stream_id);
+    EXPECT_THAT(request_encoder->getStream().codecStreamId(), Eq(expected_stream_id));
+    EXPECT_THAT(getActiveStreamsIds(*client_), Eq(expected_stream_ids));
+    EXPECT_THAT(getActiveStreamsIds(*server_), Eq(expected_stream_ids));
+    expected_stream_id += 2;
+  }
+}
+
 TEST_P(Http2CodecImplTest, ProtocolErrorForTest) {
   initialize();
   EXPECT_EQ(absl::nullopt, request_encoder_->http1StreamEncoderOptions());
@@ -978,7 +1004,7 @@ TEST_P(Http2CodecImplTest, Invalid204WithContentLengthAllowed) {
   }
 
   EXPECT_CALL(request_callbacks, onResetStream(StreamResetReason::ProtocolError, _));
-  EXPECT_CALL(server_stream_callbacks_, onResetStream(StreamResetReason::RemoteReset, _));
+  EXPECT_CALL(server_stream_callbacks_, onResetStream(StreamResetReason::ProtocolError, _));
   response_encoder_->encodeHeaders(response_headers, false);
   driveToCompletion();
   EXPECT_TRUE(client_wrapper_->status_.ok());
@@ -1001,11 +1027,7 @@ TEST_P(Http2CodecImplTest, RefusedStreamReset) {
   EXPECT_CALL(server_stream_callbacks_,
               onResetStream(StreamResetReason::LocalRefusedStreamReset, _));
   EXPECT_CALL(callbacks, onResetStream(StreamResetReason::RemoteRefusedStreamReset, _));
-  if (Runtime::runtimeFeatureEnabled("envoy.reloadable_features.http2_propagate_reset_events")) {
-    EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset()).Times(2);
-  } else {
-    EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
-  }
+  EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
   response_encoder_->getStream().resetStream(StreamResetReason::LocalRefusedStreamReset);
   driveToCompletion();
 }
@@ -2062,11 +2084,8 @@ TEST_P(Http2CodecImplFlowControlTest, EarlyResetRestoresWindow) {
         server_->onUnderlyingConnectionAboveWriteBufferHighWatermark();
         server_->onUnderlyingConnectionBelowWriteBufferLowWatermark();
       }));
-  if (Runtime::runtimeFeatureEnabled("envoy.reloadable_features.http2_propagate_reset_events")) {
-    EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset()).Times(2);
-  } else {
-    EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
-  }
+
+  EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
   response_encoder_->getStream().resetStream(StreamResetReason::LocalRefusedStreamReset);
   driveToCompletion();
 
@@ -2724,6 +2743,65 @@ TEST(Http2CodecUtility, reconstituteCrumbledCookies) {
   }
 }
 
+// Verify that well-known header names use references to static strings and not copies.
+TEST(Http2CodecUtility, staticHeaderNameOptimization) {
+  // Test common HTTP/2 pseudo-headers.
+  {
+    HeaderString method_header(Headers::get().Method);
+    HeaderString path_header(Headers::get().Path);
+    HeaderString status_header(Headers::get().Status);
+    HeaderString authority_header(Headers::get().Host);
+    HeaderString scheme_header(Headers::get().Scheme);
+
+    // Verify these are references (not copies).
+    EXPECT_TRUE(method_header.isReference());
+    EXPECT_TRUE(path_header.isReference());
+    EXPECT_TRUE(status_header.isReference());
+    EXPECT_TRUE(authority_header.isReference());
+    EXPECT_TRUE(scheme_header.isReference());
+
+    // Verify the string values are correct.
+    EXPECT_EQ(method_header.getStringView(), ":method");
+    EXPECT_EQ(path_header.getStringView(), ":path");
+    EXPECT_EQ(status_header.getStringView(), ":status");
+    EXPECT_EQ(authority_header.getStringView(), ":authority");
+    EXPECT_EQ(scheme_header.getStringView(), ":scheme");
+  }
+
+  // Test common request headers.
+  {
+    HeaderString content_type_header(Headers::get().ContentType);
+    HeaderString content_length_header(Headers::get().ContentLength);
+    HeaderString user_agent_header(Headers::get().UserAgent);
+
+    EXPECT_TRUE(content_type_header.isReference());
+    EXPECT_TRUE(content_length_header.isReference());
+    EXPECT_TRUE(user_agent_header.isReference());
+
+    EXPECT_EQ(content_type_header.getStringView(), "content-type");
+    EXPECT_EQ(content_length_header.getStringView(), "content-length");
+    EXPECT_EQ(user_agent_header.getStringView(), "user-agent");
+  }
+
+  // Test that custom headers without static mappings are copied.
+  {
+    HeaderString custom_header;
+    custom_header.setCopy("x-custom-header", 15);
+
+    EXPECT_FALSE(custom_header.isReference());
+    EXPECT_EQ(custom_header.getStringView(), "x-custom-header");
+  }
+
+  // Test that when using setReference directly with a static string, it works correctly.
+  {
+    HeaderString ref_header;
+    ref_header.setReference(Headers::get().UserAgent.get());
+
+    EXPECT_TRUE(ref_header.isReference());
+    EXPECT_EQ(ref_header.getStringView(), "user-agent");
+  }
+}
+
 MATCHER_P(HasValue, m, "") {
   if (!arg.has_value()) {
     *result_listener << "does not contain a value";
@@ -2849,11 +2927,7 @@ TEST_P(Http2CodecImplTest, LargeRequestHeadersInvokeResetStream) {
   std::string long_string = std::string(63 * 1024, 'q');
   request_headers.addCopy("big", long_string);
   EXPECT_CALL(server_stream_callbacks_, onResetStream(_, _));
-  if (Runtime::runtimeFeatureEnabled("envoy.reloadable_features.http2_propagate_reset_events")) {
-    EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
-  } else {
-    EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset()).Times(0);
-  }
+  EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
   EXPECT_TRUE(request_encoder_->encodeHeaders(request_headers, false).ok());
   driveToCompletion();
 }
@@ -2901,11 +2975,7 @@ TEST_P(Http2CodecImplTest, HeaderNameWithUnderscoreAreRejected) {
   request_headers.addCopy("bad_header", "something");
 
   EXPECT_CALL(server_stream_callbacks_, onResetStream(_, _));
-  if (Runtime::runtimeFeatureEnabled("envoy.reloadable_features.http2_propagate_reset_events")) {
-    EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
-  } else {
-    EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset()).Times(0);
-  }
+  EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
   EXPECT_TRUE(request_encoder_->encodeHeaders(request_headers, false).ok());
   driveToCompletion();
   EXPECT_EQ(
@@ -2960,11 +3030,7 @@ TEST_P(Http2CodecImplTest, ManyRequestHeadersInvokeResetStream) {
     request_headers.addCopy(std::to_string(i), "");
   }
   EXPECT_CALL(server_stream_callbacks_, onResetStream(_, _));
-  if (Runtime::runtimeFeatureEnabled("envoy.reloadable_features.http2_propagate_reset_events")) {
-    EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
-  } else {
-    EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset()).Times(0);
-  }
+  EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
   EXPECT_TRUE(request_encoder_->encodeHeaders(request_headers, false).ok());
   driveToCompletion();
 }
@@ -3139,6 +3205,100 @@ TEST_P(Http2CodecImplTestAll, TestCodecHeaderCompression) {
     EXPECT_EQ(0, getHpackEncoderDynamicTableSize(client_));
     EXPECT_EQ(0, getHpackEncoderDynamicTableSize(server_));
   }
+}
+
+TEST_P(Http2CodecImplTest, TestCanDisableHuffmanEncoding) {
+  TestRequestHeaderMapImpl request_headers;
+  HttpTestUtility::addDefaultHeaders(request_headers);
+  request_headers.addCopy("x-well-compressable-header", std::string(1000, 'a'));
+
+  // Create a connection with huffman disabled.
+  client_http2_options_.mutable_enable_huffman_encoding()->set_value(false);
+  initialize();
+
+  std::string buffer_without_huffman;
+  ON_CALL(client_connection_, write(_, _))
+      .WillByDefault(Invoke([&buffer_without_huffman, this](Buffer::Instance& data, bool) -> void {
+        buffer_without_huffman.append(data.toString());
+        server_wrapper_->buffer_.add(data);
+      }));
+
+  EXPECT_CALL(request_decoder_, decodeHeaders_(_, true));
+  EXPECT_TRUE(request_encoder_->encodeHeaders(request_headers, true).ok());
+  driveToCompletion();
+
+  ASSERT_EQ(client_wrapper_->buffer_.length(), 0);
+  ASSERT_EQ(server_wrapper_->buffer_.length(), 0);
+
+  // Create a connection with huffman enabled.
+  client_http2_options_.mutable_enable_huffman_encoding()->set_value(true);
+  NiceMock<Network::MockConnection> client_connection2;
+  MockConnectionCallbacks client_callbacks2;
+  client_ = std::make_unique<TestClientConnectionImpl>(
+      client_connection2, client_callbacks2, *client_stats_store_.rootScope(),
+      client_http2_options_, random_, max_request_headers_kb_, max_response_headers_count_,
+      ProdNghttp2SessionFactory::get());
+  client_wrapper_ = std::make_unique<ConnectionWrapper>(client_.get());
+
+  NiceMock<Network::MockConnection> server_connection2;
+  MockServerConnectionCallbacks server_callbacks2;
+
+  server_ = std::make_unique<TestServerConnectionImpl>(
+      server_connection2, server_callbacks2, *server_stats_store_.rootScope(),
+      server_http2_options_, random_, max_request_headers_kb_, max_request_headers_count_,
+      headers_with_underscores_action_);
+  server_wrapper_ = std::make_unique<ConnectionWrapper>(server_.get());
+
+  // Setup connection mocks for the second connection
+  ON_CALL(server_connection2, write(_, _))
+      .WillByDefault(Invoke(
+          [this](Buffer::Instance& data, bool) -> void { client_wrapper_->buffer_.add(data); }));
+  ON_CALL(client_connection2, write(_, _))
+      .WillByDefault(Invoke(
+          [this](Buffer::Instance& data, bool) -> void { server_wrapper_->buffer_.add(data); }));
+
+  driveToCompletion();
+
+  // Set up stream for the second connection
+  MockResponseDecoder response_decoder2;
+  auto request_encoder2 = &client_->newStream(response_decoder2);
+  ResponseEncoder* response_encoder2 = nullptr;
+  MockStreamCallbacks server_stream_callbacks2;
+  MockCodecEventCallbacks server_codec_event_callbacks2;
+  MockRequestDecoder request_decoder2;
+  setupRequestDecoderMock(request_decoder2);
+
+  EXPECT_CALL(server_callbacks2, newStream(_, _))
+      .WillOnce(Invoke([&](ResponseEncoder& encoder, bool) -> RequestDecoder& {
+        response_encoder2 = &encoder;
+        encoder.getStream().addCallbacks(server_stream_callbacks2);
+        encoder.getStream().registerCodecEventCallbacks(&server_codec_event_callbacks2);
+        encoder.getStream().setFlushTimeout(std::chrono::milliseconds(30000));
+        return request_decoder2;
+      }));
+
+  // Capture the header frame encoded.
+  std::string buffer_with_huffman;
+  ON_CALL(client_connection2, write(_, _))
+      .WillByDefault(Invoke([this, &buffer_with_huffman](Buffer::Instance& data, bool) -> void {
+        server_wrapper_->buffer_.add(data);
+        buffer_with_huffman.append(data.toString());
+      }));
+
+  // Encode headers with Huffman encoding
+  EXPECT_CALL(request_decoder2, decodeHeaders_(_, true));
+  EXPECT_TRUE(request_encoder2->encodeHeaders(request_headers, true).ok());
+
+  // Drive to completion
+  driveToCompletion();
+
+  // Verify that the two encoded buffers are different
+  EXPECT_NE(buffer_without_huffman, buffer_with_huffman);
+
+  // Huffman encoding is smaller with these particular headers.
+  EXPECT_GT(buffer_without_huffman.length(), 0);
+  EXPECT_GT(buffer_with_huffman.length(), 0);
+  EXPECT_GT(buffer_without_huffman.length(), buffer_with_huffman.length());
 }
 
 // Verify that codec detects PING flood
@@ -3808,11 +3968,7 @@ TEST_P(Http2CodecImplTest, ConnectTest) {
 
   EXPECT_CALL(callbacks, onResetStream(StreamResetReason::ConnectError, _));
   EXPECT_CALL(server_stream_callbacks_, onResetStream(StreamResetReason::ConnectError, _));
-  if (Runtime::runtimeFeatureEnabled("envoy.reloadable_features.http2_propagate_reset_events")) {
-    EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset()).Times(2);
-  } else {
-    EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
-  }
+  EXPECT_CALL(server_codec_event_callbacks_, onCodecLowLevelReset());
   response_encoder_->getStream().resetStream(StreamResetReason::ConnectError);
   driveToCompletion();
 }

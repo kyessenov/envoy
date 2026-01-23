@@ -177,6 +177,7 @@ envoy_cc_test(
         "//test/mocks/http:http_mocks",
         "//test/mocks/http:stream_decoder_mock",
         "//test/mocks/network:network_mocks",
+        "//test/mocks/server:overload_manager_mocks",
         "//test/mocks/stats:stats_mocks",
         "//test/test_common:global_lib",
         "//test/test_common:logging_lib",
@@ -201,6 +202,7 @@ envoy_cc_test(
         "//source/common/quic:envoy_quic_client_connection_lib",
         "//source/common/quic:envoy_quic_client_session_lib",
         "//source/common/quic:envoy_quic_connection_helper_lib",
+        "//source/common/quic:quic_client_packet_writer_factory_impl_lib",
         "//source/extensions/quic/crypto_stream:envoy_quic_crypto_client_stream_lib",
         "//test/mocks/api:api_mocks",
         "//test/mocks/http:http_mocks",
@@ -349,10 +351,9 @@ envoy_cc_test(
 
 envoy_cc_test_library(
     name = "test_utils_lib",
-    hdrs = envoy_select_enable_http3(["test_utils.h"]),
+    hdrs = ["test_utils.h"],
     external_deps = ["bazel_runfiles"],
     deps = envoy_select_enable_http3([
-        "//envoy/stream_info:stream_info_interface",
         "//source/common/quic:envoy_quic_client_connection_lib",
         "//source/common/quic:envoy_quic_client_session_lib",
         "//source/common/quic:envoy_quic_connection_debug_visitor_factory_interface",
@@ -360,12 +361,15 @@ envoy_cc_test_library(
         "//source/common/quic:envoy_quic_server_connection_lib",
         "//source/common/quic:quic_filter_manager_connection_lib",
         "//test/common/config:dummy_config_proto_cc_proto",
-        "//test/test_common:environment_lib",
-        "//test/test_common:utility_lib",
         "@com_github_google_quiche//:quic_core_http_spdy_session_lib",
         "@com_github_google_quiche//:quic_test_tools_first_flight_lib",
         "@com_github_google_quiche//:quic_test_tools_qpack_qpack_test_utils_lib",
-    ]),
+    ]) + [
+        "//envoy/stream_info:stream_info_interface",
+        "//source/common/quic:envoy_quic_network_observer_registry_factory_lib",
+        "//test/test_common:environment_lib",
+        "//test/test_common:utility_lib",
+    ],
 )
 
 envoy_cc_test(
@@ -432,7 +436,7 @@ envoy_proto_library(
 
 envoy_cc_test_library(
     name = "envoy_quic_h3_fuzz_helper_lib",
-    srcs = ["envoy_quic_h3_fuzz_helper.cc"],
+    srcs = envoy_select_enable_http3(["envoy_quic_h3_fuzz_helper.cc"]),
     hdrs = ["envoy_quic_h3_fuzz_helper.h"],
     deps = [
         ":envoy_quic_h3_fuzz_proto_cc_proto",

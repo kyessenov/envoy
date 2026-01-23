@@ -284,6 +284,16 @@ envoy_cc_library(
 )
 
 envoy_cc_library(
+    name = "forward_client_cert_lib",
+    hdrs = ["forward_client_cert.h"],
+    deps = [
+        "//envoy/http:filter_interface",
+        "//envoy/matcher:matcher_interface",
+        "//source/common/matcher:matcher_lib",
+    ],
+)
+
+envoy_cc_library(
     name = "conn_manager_config_interface",
     hdrs = ["conn_manager_config.h"],
     deps = [
@@ -294,6 +304,7 @@ envoy_cc_library(
         "//envoy/http:header_validator_interface",
         "//envoy/http:original_ip_detection_interface",
         "//envoy/http:request_id_extension_interface",
+        "//envoy/matcher:matcher_interface",
         "//envoy/router:rds_interface",
         "//envoy/router:scopes_interface",
         "//source/common/local_reply:local_reply_lib",
@@ -359,6 +370,7 @@ envoy_cc_library(
         ":conn_manager_config_interface",
         ":exception_lib",
         ":filter_manager_lib",
+        ":forward_client_cert_lib",
         ":header_map_lib",
         ":header_utility_lib",
         ":headers_lib",
@@ -404,6 +416,8 @@ envoy_cc_library(
         "//source/common/config:utility_lib",
         "//source/common/http/http1:codec_lib",
         "//source/common/http/http2:codec_lib",
+        "//source/common/http/matching:data_impl_lib",
+        "//source/common/matcher:matcher_lib",
         "//source/common/network:proxy_protocol_filter_state_lib",
         "//source/common/network:utility_lib",
         "//source/common/quic:quic_server_factory_stub_lib",
@@ -599,7 +613,7 @@ envoy_cc_library(
         "//source/common/common:logger_lib",
         "//source/common/runtime:runtime_features_lib",
         "@com_google_absl//absl/types:optional",
-        "@com_googlesource_googleurl//url",
+        "@googleurl//url",
     ],
 )
 
@@ -642,5 +656,26 @@ envoy_cc_library(
         "//source/common/common:matchers_lib",
         "//source/common/router:header_parser_lib",
         "@envoy_api//envoy/config/common/mutation_rules/v3:pkg_cc_proto",
+    ],
+)
+
+envoy_cc_library(
+    name = "muxdemux_lib",
+    srcs = ["muxdemux.cc"],
+    hdrs = ["muxdemux.h"],
+    deps = [
+        "//envoy/buffer:buffer_interface",
+        "//envoy/http:async_client_interface",
+        "//envoy/http:header_map_interface",
+        "//envoy/server:factory_context_interface",
+        "//envoy/stream_info:stream_info_interface",
+        "//envoy/upstream:thread_local_cluster_interface",
+        "//source/common/common:assert_lib",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/types:optional",
+        "@com_google_absl//absl/types:span",
     ],
 )

@@ -129,7 +129,8 @@ void ActiveTcpConnection::onEvent(Network::ConnectionEvent event) {
   // Any close event leads to destruction of the connection.
   if (event == Network::ConnectionEvent::LocalClose ||
       event == Network::ConnectionEvent::RemoteClose) {
-    stream_info_->setDownstreamTransportFailureReason(connection_->transportFailureReason());
+    // NOTE: Transport failure reason is set in ConnectionImpl::closeSocket() before events
+    // are raised, so it should already be available in stream_info_ at this point.
     active_connections_.listener_.removeConnection(*this);
   }
 }

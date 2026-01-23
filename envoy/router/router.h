@@ -34,7 +34,9 @@
 #include "absl/types/optional.h"
 
 namespace Envoy {
-
+namespace Formatter {
+class Formatter;
+}
 namespace Upstream {
 class ClusterManager;
 class LoadBalancerContext;
@@ -96,11 +98,21 @@ public:
   virtual std::string newUri(const Http::RequestHeaderMap& headers) const PURE;
 
   /**
-   * Returns the response body to send with direct responses.
-   * @return std::string& the response body specified in the route configuration,
-   *         or an empty string if no response body is specified.
+   * Format the response body for direct responses. Users should pass
+   * a string reference to populate, `body`, and the return value may
+   * or may not be the same reference based on if a formatter is applied.
+   * If a formatter is applied, the return value will be the same reference.
+   * If no formatter is applied, the return value will be the configured body.
+   * @param request_headers supplies the request headers.
+   * @param response_headers supplies the response headers.
+   * @param stream_info holds additional information about the request.
+   * @param body_out a string in which a formatted body may be stored.
+   * @return std::string& the response body.
    */
-  virtual const std::string& responseBody() const PURE;
+  virtual absl::string_view formatBody(const Http::RequestHeaderMap& request_headers,
+                                       const Http::ResponseHeaderMap& response_headers,
+                                       const StreamInfo::StreamInfo& stream_info,
+                                       std::string& body_out) const PURE;
 
   /**
    * Do potentially destructive header transforms on Path header prior to redirection. For
@@ -692,22 +704,6 @@ public:
   virtual bool includeIsTimeoutRetryHeader() const PURE;
 
   /**
-   * @return uint64_t the maximum bytes which should be buffered for request bodies. This enables
-   *         buffering larger request bodies beyond the connection buffer limit for use cases
-   *         with large payloads, shadowing, or retries.
-   *
-   *         This method consolidates the functionality of the previous
-   *         per_request_buffer_limit_bytes and request_body_buffer_limit fields. It supports both
-   *         legacy configurations using per_request_buffer_limit_bytes and new configurations using
-   *         request_body_buffer_limit.
-   *
-   *         If neither is set, falls back to connection buffer limits. Unlike some other buffer
-   *         limits, 0 here indicates buffering should not be performed rather than no limit
-   * applies.
-   */
-  virtual uint64_t requestBodyBufferLimit() const PURE;
-
-  /**
    * This is a helper to get the route's per-filter config if it exists, up along the config
    * hierarchy (Route --> VirtualHost --> RouteConfiguration). Or nullptr if none of them exist.
    */
@@ -1235,6 +1231,18 @@ public:
    * @return the tracing custom tags.
    */
   virtual const Tracing::CustomTagMap& getCustomTags() const PURE;
+
+  /**
+   * This method returns operation name formatter of span for the route.
+   * @return the operation formatter.
+   */
+  virtual OptRef<const Formatter::Formatter> operation() const PURE;
+
+  /**
+   * This method returns operation name formatter of upstream span for the route.
+   * @return the operation name formatter.
+   */
+  virtual OptRef<const Formatter::Formatter> upstreamOperation() const PURE;
 };
 
 using RouteTracingConstPtr = std::unique_ptr<const RouteTracing>;

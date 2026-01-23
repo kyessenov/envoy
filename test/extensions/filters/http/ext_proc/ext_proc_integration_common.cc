@@ -2,11 +2,17 @@
 
 #include <chrono>
 
+#include "envoy/config/common/matcher/v3/matcher.pb.h"
+#include "envoy/extensions/access_loggers/file/v3/file.pb.h"
+#include "envoy/extensions/common/matching/v3/extension_matcher.pb.h"
+#include "envoy/extensions/filters/http/composite/v3/composite.pb.h"
 #include "envoy/extensions/filters/http/ext_proc/v3/ext_proc.pb.h"
 #include "envoy/extensions/filters/http/set_metadata/v3/set_metadata.pb.h"
 #include "envoy/extensions/filters/network/http_connection_manager/v3/http_connection_manager.pb.h"
+#include "envoy/type/matcher/v3/http_inputs.pb.h"
 
 #include "source/common/protobuf/protobuf.h"
+#include "source/common/protobuf/utility.h"
 
 #include "gtest/gtest.h"
 
@@ -82,18 +88,27 @@ void ExtProcIntegrationTest::initializeConfig(
     }
 
     std::string ext_proc_filter_name = "envoy.filters.http.ext_proc";
-    if (composite_test_) {
-      prependExprocCompositeFilter();
-    } else {
-      if (config_option.downstream_filter) {
-        // Construct a configuration proto for our filter and then re-write it
-        // to JSON so that we can add it to the overall config
-        envoy::extensions::filters::network::http_connection_manager::v3::HttpFilter
-            ext_proc_filter;
-        ext_proc_filter.set_name(ext_proc_filter_name);
-        ext_proc_filter.mutable_typed_config()->PackFrom(proto_config_);
-        config_helper_.prependFilter(MessageUtil::getJsonStringFromMessageOrError(ext_proc_filter));
-      }
+    switch (config_option.filter_setup) {
+    case ConfigOptions::FilterSetup::kNone:
+      break;
+    case ConfigOptions::FilterSetup::kDownstream: {
+      // Construct a configuration proto for our filter and then re-write it
+      // to JSON so that we can add it to the overall config
+      envoy::extensions::filters::network::http_connection_manager::v3::HttpFilter ext_proc_filter;
+      ext_proc_filter.set_name(ext_proc_filter_name);
+      ext_proc_filter.mutable_typed_config()->PackFrom(proto_config_);
+      config_helper_.prependFilter(MessageUtil::getJsonStringFromMessageOrError(ext_proc_filter));
+    } break;
+    case ConfigOptions::FilterSetup::kCompositeMatchOnRequestHeaders: {
+      envoy::type::matcher::v3::HttpRequestHeaderMatchInput request_match_input;
+      request_match_input.set_header_name("match-header");
+      prependExtProcCompositeFilter(request_match_input);
+    } break;
+    case ConfigOptions::FilterSetup::kCompositeMatchOnResponseHeaders: {
+      envoy::type::matcher::v3::HttpResponseHeaderMatchInput response_match_input;
+      response_match_input.set_header_name("match-header");
+      prependExtProcCompositeFilter(response_match_input);
+    } break;
     }
 
     // Add set_metadata filter to inject dynamic metadata used for testing
@@ -838,40 +853,109 @@ void ExtProcIntegrationTest::serverSendTrailerRespDuplexStreamed() {
   processor_stream_->sendGrpcMessage(response_trailer);
 }
 
-void ExtProcIntegrationTest::prependExprocCompositeFilter() {
-  config_helper_.prependFilter(absl::StrFormat(R"EOF(
-      name: composite
-      typed_config:
-        "@type": type.googleapis.com/envoy.extensions.common.matching.v3.ExtensionWithMatcher
-        extension_config:
-          name: composite
-          typed_config:
-            "@type": type.googleapis.com/envoy.extensions.filters.http.composite.v3.Composite
-        xds_matcher:
-          matcher_tree:
-            input:
-              name: request-headers
-              typed_config:
-                "@type": type.googleapis.com/envoy.type.matcher.v3.HttpRequestHeaderMatchInput
-                header_name: match-header
-            exact_match_map:
-              map:
-                match:
-                  action:
-                    name: composite-action
-                    typed_config:
-                      "@type": type.googleapis.com/envoy.extensions.filters.http.composite.v3.ExecuteFilterAction
-                      typed_config:
-                        name: envoy.filters.http.ext_proc
-                        typed_config:
-                          "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor
-                          grpc_service:
-                            envoy_grpc:
-                              cluster_name: ext_proc_server_0
-                            timeout: 300s
+void ExtProcIntegrationTest::prependExtProcCompositeFilter(const Protobuf::Message& match_input) {
+  envoy::extensions::filters::network::http_connection_manager::v3::HttpFilter composite_filter;
+  composite_filter.set_name("composite");
 
-    )EOF"),
+  envoy::extensions::common::matching::v3::ExtensionWithMatcher extension_with_matcher;
+  auto* extension_config = extension_with_matcher.mutable_extension_config();
+  extension_config->set_name("composite");
+  envoy::extensions::filters::http::composite::v3::Composite composite_config;
+  extension_config->mutable_typed_config()->PackFrom(composite_config);
+
+  auto* matcher_tree = extension_with_matcher.mutable_xds_matcher()->mutable_matcher_tree();
+  auto* input = matcher_tree->mutable_input();
+  input->set_name("match-input");
+  input->mutable_typed_config()->PackFrom(match_input);
+
+  envoy::extensions::filters::http::composite::v3::ExecuteFilterAction execute_filter_action;
+  auto* typed_config = execute_filter_action.mutable_typed_config();
+  typed_config->set_name("envoy.filters.http.ext_proc");
+  typed_config->mutable_typed_config()->PackFrom(proto_config_);
+
+  auto& on_match = (*matcher_tree->mutable_exact_match_map()->mutable_map())["match"];
+  on_match.mutable_action()->set_name("composite-action");
+  on_match.mutable_action()->mutable_typed_config()->PackFrom(execute_filter_action);
+
+  composite_filter.mutable_typed_config()->PackFrom(extension_with_matcher);
+  config_helper_.prependFilter(MessageUtil::getJsonStringFromMessageOrError(composite_filter),
                                true);
+}
+
+void ExtProcIntegrationTest::initializeLogConfig(std::string& access_log_path) {
+  config_helper_.addConfigModifier([&](ConfigHelper::HttpConnectionManager& cm) {
+    auto* access_log = cm.add_access_log();
+    access_log->set_name("accesslog");
+    envoy::extensions::access_loggers::file::v3::FileAccessLog access_log_config;
+    access_log_config.set_path(access_log_path);
+    auto* json_format = access_log_config.mutable_log_format()->mutable_json_format();
+
+    // Test all three serialization modes.
+    (*json_format->mutable_fields())["ext_proc_plain"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:PLAIN)%");
+    (*json_format->mutable_fields())["ext_proc_typed"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:TYPED)%");
+
+    // Test field extraction for coverage.
+    (*json_format->mutable_fields())["field_request_header_latency"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:request_header_latency_us)%");
+    (*json_format->mutable_fields())["field_request_header_status"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:request_header_call_status)%");
+    (*json_format->mutable_fields())["field_request_body_calls"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:request_body_call_count)%");
+    (*json_format->mutable_fields())["field_request_body_total_latency"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:request_body_total_latency_us)%");
+    (*json_format->mutable_fields())["field_request_body_max_latency"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:request_body_max_latency_us)%");
+    (*json_format->mutable_fields())["field_request_body_last_status"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:request_body_last_call_status)%");
+    (*json_format->mutable_fields())["field_request_trailer_latency"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:request_trailer_latency_us)%");
+    (*json_format->mutable_fields())["field_request_trailer_status"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:request_trailer_call_status)%");
+    (*json_format->mutable_fields())["field_response_header_latency"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:response_header_latency_us)%");
+    (*json_format->mutable_fields())["field_response_header_status"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:response_header_call_status)%");
+    (*json_format->mutable_fields())["field_response_body_calls"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:response_body_call_count)%");
+    (*json_format->mutable_fields())["field_response_body_total_latency"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:response_body_total_latency_us)%");
+    (*json_format->mutable_fields())["field_response_body_max_latency"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:response_body_max_latency_us)%");
+    (*json_format->mutable_fields())["field_response_body_last_status"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:response_body_last_call_status)%");
+    (*json_format->mutable_fields())["field_response_trailer_latency"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:response_trailer_latency_us)%");
+    (*json_format->mutable_fields())["field_response_trailer_status"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:response_trailer_call_status)%");
+    (*json_format->mutable_fields())["field_bytes_sent"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:bytes_sent)%");
+    (*json_format->mutable_fields())["field_bytes_received"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:bytes_received)%");
+    (*json_format->mutable_fields())["field_request_header_effect"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:request_header_processing_effect)%");
+    (*json_format->mutable_fields())["field_request_body_effect"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:request_body_processing_effect)%");
+    (*json_format->mutable_fields())["field_request_trailer_effect"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:request_trailer_processing_effect)%");
+    (*json_format->mutable_fields())["field_response_header_effect"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:response_header_processing_effect)%");
+    (*json_format->mutable_fields())["field_response_body_effect"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:response_body_processing_effect)%");
+    (*json_format->mutable_fields())["field_response_trailer_effect"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:response_trailer_processing_effect)%");
+    (*json_format->mutable_fields())["failed_open_field"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:failed_open)%");
+    (*json_format->mutable_fields())["field_grpc_status_before_first_call"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:grpc_status_before_first_call)%");
+
+    // Test non-existent field for coverage
+    (*json_format->mutable_fields())["field_non_existent"].set_string_value(
+        "%FILTER_STATE(envoy.filters.http.ext_proc:FIELD:non_existent_field)%");
+
+    access_log->mutable_typed_config()->PackFrom(access_log_config);
+  });
 }
 
 } // namespace ExternalProcessing

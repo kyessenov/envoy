@@ -1,4 +1,3 @@
-load("@bazel_skylib//lib:selects.bzl", "selects")
 load(
     "@envoy_build_config//:extensions_build_config.bzl",
     "LEGACY_ALWAYSLINK",
@@ -12,15 +11,6 @@ load(
 )
 
 licenses(["notice"])  # Apache 2
-
-# Create a condition for HTTP3 enabled AND Linux
-selects.config_setting_group(
-    name = "http3_enabled_and_linux",
-    match_all = [
-        "//bazel:linux",
-        "//bazel:enable_http3",
-    ],
-)
 
 # TODO(mattklein123): Default visibility for this package should not be public. We should have
 # default by private to within this package and package tests, and then only expose the libraries
@@ -204,6 +194,7 @@ envoy_cc_library(
         "//source/common/runtime:runtime_lib",
         "//source/common/tls:client_ssl_socket_lib",
         "//source/extensions/quic/crypto_stream:envoy_quic_crypto_client_stream_lib",
+        "//source/extensions/quic/client_packet_writer:default_quic_client_packet_writer_factory_config",
         "@com_github_google_quiche//:quic_core_http_spdy_session_lib",
     ]),
 )
@@ -237,6 +228,7 @@ envoy_cc_library(
         ":quic_server_factory_stub_lib",
         "//envoy/http:codec_interface",
         "//envoy/registry",
+        "//envoy/server/overload:overload_manager_interface",
         "@com_github_google_quiche//:quic_core_http_spdy_session_lib",
     ]),
     alwayslink = LEGACY_ALWAYSLINK,
@@ -331,10 +323,12 @@ envoy_cc_library(
         "//envoy/http:http_server_properties_cache_interface",
         "//source/common/buffer:buffer_lib",
         "//source/common/common:assert_lib",
+        "//source/common/common:logger_lib",
         "//source/common/http:codes_lib",
         "//source/common/http:header_map_lib",
         "//source/common/http:header_utility_lib",
         "@com_github_google_quiche//:quic_core_http_client_lib",
+        "@com_github_google_quiche//:quic_core_error_codes_lib",
     ]) + envoy_select_enable_http_datagrams([
         ":http_datagram_handler",
     ]),
@@ -347,6 +341,7 @@ envoy_cc_library(
     ],
     deps = envoy_select_enable_http3([
         "//source/common/common:logger_lib",
+        "@com_github_google_quiche//:quic_core_path_validator_lib",
     ]),
 )
 
@@ -396,17 +391,48 @@ envoy_cc_library(
 )
 
 envoy_cc_library(
+    name = "quic_client_packet_writer_factory_impl_lib",
+    srcs = envoy_select_enable_http3(["quic_client_packet_writer_factory_impl.cc"]),
+    hdrs = envoy_select_enable_http3(["quic_client_packet_writer_factory_impl.h"]),
+    deps = envoy_select_enable_http3([
+        ":envoy_quic_packet_writer_lib",
+        ":envoy_quic_utils_lib",
+        ":envoy_quic_client_packet_writer_factory_interface",
+        "//source/common/network:connection_socket_lib",
+        "//source/common/network:udp_packet_writer_handler_lib",
+    ]),
+)
+
+envoy_cc_library(
+    name = "envoy_quic_client_packet_writer_factory_interface",
+    hdrs = envoy_select_enable_http3(["envoy_quic_client_packet_writer_factory.h"]),
+    deps = envoy_select_enable_http3([
+        ":envoy_quic_packet_writer_lib",
+        "//envoy/config:typed_config_interface",
+        "//envoy/network:address_interface",
+        "//envoy/network:listen_socket_interface",
+        "//envoy/server:factory_context_interface",
+        "@com_github_google_quiche//:quic_core_path_validator_lib",
+        "@com_github_google_quiche//:quic_core_types_lib",
+    ]),
+)
+
+envoy_cc_library(
     name = "envoy_quic_client_connection_lib",
     srcs = envoy_select_enable_http3(["envoy_quic_client_connection.cc"]),
     hdrs = envoy_select_enable_http3(["envoy_quic_client_connection.h"]),
     deps = envoy_select_enable_http3([
+        ":envoy_quic_client_packet_writer_factory_interface",
         ":envoy_quic_packet_writer_lib",
+        ":envoy_quic_network_observer_registry_factory_lib",
         ":quic_network_connection_lib",
         "//envoy/event:dispatcher_interface",
+        "//envoy/network:listen_socket_interface",
         "//source/common/network:socket_option_factory_lib",
         "//source/common/network:udp_packet_writer_handler_lib",
         "//source/common/runtime:runtime_lib",
         "@com_github_google_quiche//:quic_core_connection_lib",
+        "@com_github_google_quiche//:quic_core_http_client_lib",
         "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
     ]),
 )
@@ -479,6 +505,7 @@ envoy_cc_library(
         "@com_github_google_quiche//:quic_core_config_lib",
         "@com_github_google_quiche//:quic_core_http_header_list_lib",
         "@com_github_google_quiche//:quic_platform",
+        "@com_github_google_quiche//:quic_core_http_client_lib",
         "@envoy_api//envoy/config/core/v3:pkg_cc_proto",
         "@envoy_api//envoy/config/listener/v3:pkg_cc_proto",
     ]),
@@ -584,7 +611,7 @@ envoy_cc_library(
 envoy_cc_library(
     name = "udp_gso_batch_writer_lib",
     srcs = select({
-        ":http3_enabled_and_linux": ["udp_gso_batch_writer.cc"],
+        "//bazel:http3_enabled_and_linux": ["udp_gso_batch_writer.cc"],
         "//conditions:default": [],
     }),
     hdrs = envoy_select_enable_http3(["udp_gso_batch_writer.h"]),
@@ -596,7 +623,7 @@ envoy_cc_library(
         "//source/common/runtime:runtime_lib",
         "@com_github_google_quiche//:quic_platform",
     ]) + select({
-        ":http3_enabled_and_linux": ["@com_github_google_quiche//:quic_core_batch_writer_gso_batch_writer_lib"],
+        "//bazel:http3_enabled_and_linux": ["@com_github_google_quiche//:quic_core_batch_writer_gso_batch_writer_lib"],
         "//conditions:default": [],
     }),
 )
@@ -708,7 +735,7 @@ envoy_cc_library(
     hdrs = envoy_select_enable_http3(["cert_compression.h"]),
     external_deps = ["ssl"],
     deps = envoy_select_enable_http3([
-        "//bazel/foreign_cc:zlib",
+        "//bazel:zlib",
         "//source/common/common:assert_lib",
         "//source/common/common:logger_lib",
         "//source/common/runtime:runtime_lib",

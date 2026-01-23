@@ -248,11 +248,22 @@ struct ResponseCodeDetailValues {
   const std::string FilterAddedInvalidRequestData = "filter_added_invalid_request_data";
   // A filter called addDecodedData at the wrong point in the filter chain.
   const std::string FilterAddedInvalidResponseData = "filter_added_invalid_response_data";
+  // Data was received for a CONNECT request before 200 response headers were sent.
+  const std::string EarlyConnectData = "early_connect_data";
   // Changes or additions to details should be reflected in
   // docs/root/configuration/http/http_conn_man/response_code_details.rst
 };
 
 using ResponseCodeDetails = ConstSingleton<ResponseCodeDetailValues>;
+
+/**
+ * Type of connection close which is detected from the socket.
+ */
+enum class DetectedCloseType {
+  Normal,      // The normal socket close from Envoy's connection perspective.
+  LocalReset,  // The local reset initiated from Envoy.
+  RemoteReset, // The peer reset detected by the connection.
+};
 
 /**
  * Constants for the locally closing a connection. This is used in response code
@@ -329,6 +340,14 @@ struct UpstreamTiming {
     last_upstream_rx_byte_received_ = time_source.monotonicTime();
   }
 
+  /**
+   * Sets the time when the first byte of the response body is received from upstream.
+   */
+  void onFirstUpstreamRxBodyByteReceived(TimeSource& time_source) {
+    ASSERT(!first_upstream_rx_body_byte_received_);
+    first_upstream_rx_body_byte_received_ = time_source.monotonicTime();
+  }
+
   void onUpstreamConnectStart(TimeSource& time_source) {
     ASSERT(!upstream_connect_start_);
     upstream_connect_start_ = time_source.monotonicTime();
@@ -355,6 +374,7 @@ struct UpstreamTiming {
   absl::optional<MonotonicTime> last_upstream_tx_byte_sent_;
   absl::optional<MonotonicTime> first_upstream_rx_byte_received_;
   absl::optional<MonotonicTime> last_upstream_rx_byte_received_;
+  absl::optional<MonotonicTime> first_upstream_rx_body_byte_received_;
 
   absl::optional<MonotonicTime> upstream_connect_start_;
   absl::optional<MonotonicTime> upstream_connect_complete_;
@@ -1007,6 +1027,27 @@ public:
   virtual void setDownstreamTransportFailureReason(absl::string_view failure_reason) PURE;
 
   /**
+   * @param failure_reason the downstream local close reason.
+   */
+  virtual void setDownstreamLocalCloseReason(absl::string_view failure_reason) PURE;
+
+  /**
+   * @return absl::string_view the downstream local close reason, if local close did not occur an
+   * empty string view is returned.
+   */
+  virtual absl::string_view downstreamLocalCloseReason() const PURE;
+
+  /**
+   * @param close_type the downstream detected close type.
+   */
+  virtual void setDownstreamDetectedCloseType(DetectedCloseType close_type) PURE;
+
+  /**
+   * @return DetectedCloseType the downstream detected close type.
+   */
+  virtual DetectedCloseType downstreamDetectedCloseType() const PURE;
+
+  /**
    * Checked by routing filters before forwarding a request upstream.
    * @return to override the scheme header to match the upstream transport
    * protocol at routing filters.
@@ -1050,6 +1091,18 @@ public:
    * finished sending and receiving.
    */
   virtual void setShouldDrainConnectionUponCompletion(bool should_drain) PURE;
+
+  /**
+   * @return the codec level stream ID for the associated stream.
+   * This should be implemented to call the codecStreamId() method on the
+   * associated Http::Stream object.
+   */
+  virtual absl::optional<uint32_t> codecStreamId() const PURE;
+
+  /**
+   * @param id the codec level stream ID for the associated stream.
+   */
+  virtual void setCodecStreamId(absl::optional<uint32_t> id) PURE;
 };
 
 // An enum representation of the Proxy-Status error space.

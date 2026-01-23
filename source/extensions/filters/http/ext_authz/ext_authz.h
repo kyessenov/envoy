@@ -47,7 +47,9 @@ namespace ExtAuthz {
   COUNTER(invalid)                                                                                 \
   COUNTER(ignored_dynamic_metadata)                                                                \
   COUNTER(filter_state_name_collision)                                                             \
-  COUNTER(omitted_response_headers)
+  COUNTER(omitted_response_headers)                                                                \
+  COUNTER(request_header_limits_reached)                                                           \
+  COUNTER(response_header_limits_reached)
 
 /**
  * Wrapper struct for ext_authz filter stats. @see stats_macros.h
@@ -208,6 +210,8 @@ public:
 
   bool emitFilterStateStats() const { return emit_filter_state_stats_; }
 
+  bool enforceResponseHeaderLimits() const { return enforce_response_header_limits_; }
+
   bool chargeClusterResponseStats() const { return charge_cluster_response_stats_; }
 
   const Filters::Common::ExtAuthz::MatcherSharedPtr& allowedHeadersMatcher() const {
@@ -261,6 +265,7 @@ private:
   LabelsMap destination_labels_;
   const absl::optional<Protobuf::Struct> filter_metadata_;
   const bool emit_filter_state_stats_;
+  const bool enforce_response_header_limits_;
 
   const absl::optional<Runtime::FractionalPercent> filter_enabled_;
   const absl::optional<Matchers::MetadataMatcher> filter_enabled_metadata_;
@@ -421,10 +426,28 @@ private:
   validateAndCheckDecoderHeaderMutation(Filters::Common::MutationRules::CheckOperation operation,
                                         absl::string_view key, absl::string_view value) const;
 
+  void responseHeaderLimitsReached();
+
   // Called when the filter is configured to reject invalid responses & the authz response contains
   // invalid header or query parameters. Sends a local response with the configured rejection status
   // code.
   void rejectResponse();
+
+  // Validates error response headers and clears custom attributes if invalid headers are found.
+  // Returns true if headers are valid or validation is disabled, false if headers are invalid.
+  bool
+  validateAndClearInvalidErrorResponseAttributes(Filters::Common::ExtAuthz::ResponsePtr& response);
+
+  // Helper to check if we can add more headers to the response, respecting header limits.
+  // Returns true if we can add more headers, false if the limit has been reached.
+  bool canAddResponseHeader(Http::HeaderMap& response_headers);
+
+  // Helper to add error response headers (both set and append) to the response header map,
+  // respecting enforceResponseHeaderLimits().
+  void addErrorResponseHeaders(
+      Http::HeaderMap& response_headers,
+      const std::vector<std::pair<std::string, std::string>>& headers_to_set,
+      const std::vector<std::pair<std::string, std::string>>& headers_to_append);
 
   // Create a new gRPC client for per-route gRPC service configuration.
   Filters::Common::ExtAuthz::ClientPtr
@@ -461,8 +484,6 @@ private:
   Http::HeaderMapPtr getHeaderMap(const Filters::Common::ExtAuthz::ResponsePtr& response);
   FilterConfigSharedPtr config_;
   Filters::Common::ExtAuthz::ClientPtr client_;
-  // Per-route gRPC client that overrides the default client when specified.
-  Filters::Common::ExtAuthz::ClientPtr per_route_client_;
   // Server context for creating per-route clients.
   Server::Configuration::ServerFactoryContext* server_context_{nullptr};
   Http::StreamDecoderFilterCallbacks* decoder_callbacks_{};

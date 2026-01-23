@@ -29,8 +29,8 @@ public:
     ON_CALL(encoder_callbacks_, addEncodedTrailers()).WillByDefault(ReturnRef(response_trailers_));
     ON_CALL(decoder_callbacks_, decodingBuffer()).WillByDefault(Return(&buffer_));
     ON_CALL(encoder_callbacks_, encodingBuffer()).WillByDefault(Return(&buffer_));
-    ON_CALL(decoder_callbacks_, decoderBufferLimit()).WillByDefault(Return(1024));
-    ON_CALL(encoder_callbacks_, encoderBufferLimit()).WillByDefault(Return(1024));
+    ON_CALL(decoder_callbacks_, bufferLimit()).WillByDefault(Return(1024));
+    ON_CALL(encoder_callbacks_, bufferLimit()).WillByDefault(Return(1024));
     ON_CALL(decoder_callbacks_, injectDecodedDataToFilterChain(_, _))
         .WillByDefault(
             Invoke([&](Buffer::Instance& data, bool) -> void { data.drain(data.length()); }));
@@ -69,12 +69,16 @@ DEFINE_PROTO_FUZZER(
     return;
   }
 
-  // Limiting the max supported request body size to 128k.
+  // Limiting the max supported request or response body size to 64k.
+  const uint32_t max_body_size = 64 * 1024;
   if (input.request().has_proto_body()) {
-    const uint32_t max_body_size = 128 * 1024;
     if (input.request().proto_body().message().value().size() > max_body_size) {
       return;
     }
+  }
+
+  if (input.response().ByteSizeLong() > max_body_size) {
+    return;
   }
 
   static FuzzerMocks mocks;

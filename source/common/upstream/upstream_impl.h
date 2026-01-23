@@ -220,9 +220,11 @@ public:
   }
   uint32_t priority() const override { return priority_; }
   void priority(uint32_t priority) override { priority_ = priority; }
-  Network::UpstreamTransportSocketFactory&
-  resolveTransportSocketFactory(const Network::Address::InstanceConstSharedPtr& dest_address,
-                                const envoy::config::core::v3::Metadata* metadata) const override;
+  Network::UpstreamTransportSocketFactory& resolveTransportSocketFactory(
+      const Network::Address::InstanceConstSharedPtr& dest_address,
+      const envoy::config::core::v3::Metadata* metadata,
+      Network::TransportSocketOptionsConstSharedPtr transport_socket_options =
+          nullptr) const override;
   absl::optional<MonotonicTime> lastHcPassTime() const override { return last_hc_pass_time_; }
 
   void setHealthChecker(HealthCheckHostMonitorPtr&& health_checker) override {
@@ -847,17 +849,8 @@ public:
     return per_connection_buffer_limit_bytes_;
   }
   uint64_t features() const override { return features_; }
-  const Http::Http1Settings& http1Settings() const override {
-    return http_protocol_options_->http1_settings_;
-  }
-  const envoy::config::core::v3::Http2ProtocolOptions& http2Options() const override {
-    return http_protocol_options_->http2_options_;
-  }
-  const envoy::config::core::v3::Http3ProtocolOptions& http3Options() const override {
-    return http_protocol_options_->http3_options_;
-  }
-  const envoy::config::core::v3::HttpProtocolOptions& commonHttpProtocolOptions() const override {
-    return http_protocol_options_->common_http_protocol_options_;
+  const HttpProtocolOptionsConfig& httpProtocolOptions() const override {
+    return *http_protocol_options_;
   }
   absl::Status configureLbPolicies(const envoy::config::cluster::v3::Cluster& config,
                                    Server::Configuration::ServerFactoryContext& context);
@@ -949,16 +942,6 @@ public:
   bool setLocalInterfaceNameOnUpstreamConnections() const override {
     return set_local_interface_name_on_upstream_connections_;
   }
-  const absl::optional<envoy::config::core::v3::UpstreamHttpProtocolOptions>&
-  upstreamHttpProtocolOptions() const override {
-    return http_protocol_options_->upstream_http_protocol_options_;
-  }
-
-  const absl::optional<const envoy::config::core::v3::AlternateProtocolsCacheOptions>&
-  alternateProtocolsCacheOptions() const override {
-    return http_protocol_options_->alternate_protocol_cache_options_;
-  }
-
   const std::string& edsServiceName() const override {
     return eds_service_name_ != nullptr ? *eds_service_name_ : EMPTY_STRING;
   }
@@ -968,18 +951,16 @@ public:
   upstreamHttpProtocol(absl::optional<Http::Protocol> downstream_protocol) const override;
 
   // Http::FilterChainFactory
-  bool createFilterChain(Http::FilterChainManager& manager,
-                         const Http::FilterChainOptions& options) const override {
+  bool createFilterChain(Http::FilterChainFactoryCallbacks& callbacks) const override {
     if (http_filter_factories_.empty()) {
       return false;
     }
 
-    Http::FilterChainUtility::createFilterChainForFactories(manager, options,
-                                                            http_filter_factories_);
+    Http::FilterChainUtility::createFilterChainForFactories(callbacks, http_filter_factories_);
     return true;
   }
-  bool createUpgradeFilterChain(absl::string_view, const UpgradeMap*, Http::FilterChainManager&,
-                                const Http::FilterChainOptions&) const override {
+  bool createUpgradeFilterChain(absl::string_view, const UpgradeMap*,
+                                Http::FilterChainFactoryCallbacks&) const override {
     // Upgrade filter chains not yet supported for upstream HTTP filters.
     return false;
   }
@@ -1104,6 +1085,7 @@ private:
       const envoy::config::cluster::v3::UpstreamConnectionOptions::HappyEyeballsConfig>
       happy_eyeballs_config_;
   const std::unique_ptr<const Envoy::Orca::LrsReportMetricNames> lrs_report_metric_names_;
+  const std::vector<Router::ShadowPolicyPtr> shadow_policies_;
 
   // Keep small values like bools and enums at the end of the class to reduce
   // overhead via alignment

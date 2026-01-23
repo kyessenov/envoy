@@ -36,6 +36,7 @@ using Http::FilterTrailersStatus;
 using Http::LowerCaseString;
 
 using testing::AnyNumber;
+using testing::AtMost;
 using testing::Invoke;
 using testing::Return;
 using testing::ReturnRef;
@@ -93,7 +94,8 @@ protected:
     auto stream = std::make_unique<NiceMock<MockStream>>();
     EXPECT_CALL(*stream, send(_, _)).WillRepeatedly(Invoke(this, &OrderingTest::doSend));
     EXPECT_CALL(*stream, streamInfo()).WillRepeatedly(ReturnRef(async_client_stream_info_));
-    EXPECT_CALL(*stream, close());
+    EXPECT_CALL(*stream, close()).Times(AtMost(1));
+    EXPECT_CALL(*stream, halfCloseAndDeleteOnRemoteClose()).Times(AtMost(1));
     return stream;
   }
 
@@ -911,7 +913,7 @@ TEST_F(FastFailOrderingTest, GrpcErrorOnStartRequestBodyBufferedPartial) {
     pm->set_request_header_mode(ProcessingMode::SKIP);
     pm->set_request_body_mode(ProcessingMode::BUFFERED_PARTIAL);
   });
-  EXPECT_CALL(decoder_callbacks_, decoderBufferLimit()).WillRepeatedly(Return(BufferSize));
+  EXPECT_CALL(decoder_callbacks_, bufferLimit()).WillRepeatedly(Return(BufferSize));
   sendRequestHeadersPost(false);
   Buffer::OwnedImpl req_body("Hello!");
   EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
@@ -930,8 +932,7 @@ TEST_F(FastFailOrderingTest, GrpcErrorOnTransitionAboveQueueLimitWhenSendingStre
   // Set the limit low so we transition over the queue limit and start sending
   // the stream chunk.
   Buffer::OwnedImpl req_body("Hello!");
-  EXPECT_CALL(decoder_callbacks_, decoderBufferLimit())
-      .WillRepeatedly(Return(req_body.length() / 2));
+  EXPECT_CALL(decoder_callbacks_, bufferLimit()).WillRepeatedly(Return(req_body.length() / 2));
   EXPECT_CALL(decoder_callbacks_, onDecoderFilterAboveWriteBufferHighWatermark());
   EXPECT_CALL(encoder_callbacks_, sendLocalReply(Http::Code::InternalServerError, _, _, _, _));
 
@@ -981,7 +982,7 @@ TEST_F(FastFailOrderingTest, GrpcErrorIgnoredOnStartRequestBodyBufferedPartial) 
     pm->set_request_header_mode(ProcessingMode::SKIP);
     pm->set_request_body_mode(ProcessingMode::BUFFERED_PARTIAL);
   });
-  EXPECT_CALL(decoder_callbacks_, decoderBufferLimit()).WillRepeatedly(Return(BufferSize));
+  EXPECT_CALL(decoder_callbacks_, bufferLimit()).WillRepeatedly(Return(BufferSize));
   sendRequestHeadersPost(false);
   Buffer::OwnedImpl req_body("Hello!");
   EXPECT_EQ(FilterDataStatus::Continue, filter_->decodeData(req_body, true));

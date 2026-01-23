@@ -84,7 +84,7 @@ public:
   MOCK_METHOD(ResponseHeaderMapOptRef, responseHeaders, ());
   MOCK_METHOD(ResponseTrailerMapOptRef, responseTrailers, ());
   MOCK_METHOD(void, endStream, ());
-  MOCK_METHOD(void, sendGoAwayAndClose, ());
+  MOCK_METHOD(void, sendGoAwayAndClose, (bool graceful));
   MOCK_METHOD(void, onDecoderFilterBelowWriteBufferLowWatermark, ());
   MOCK_METHOD(void, onDecoderFilterAboveWriteBufferHighWatermark, ());
   MOCK_METHOD(void, disarmRequestTimeout, ());
@@ -192,17 +192,12 @@ public:
   MOCK_METHOD(void, addStreamFilter, (Http::StreamFilterSharedPtr filter));
   MOCK_METHOD(void, addAccessLogHandler, (AccessLog::InstanceSharedPtr handler));
   MOCK_METHOD(Event::Dispatcher&, dispatcher, ());
-};
-
-class MockFilterChainManager : public FilterChainManager {
-public:
-  MockFilterChainManager();
-  ~MockFilterChainManager() override;
-
-  // Http::FilterChainManager
-  MOCK_METHOD(void, applyFilterFactoryCb, (FilterContext context, FilterFactoryCb& factory));
-
-  NiceMock<MockFilterChainFactoryCallbacks> callbacks_;
+  MOCK_METHOD(absl::string_view, filterConfigName, (), (const));
+  MOCK_METHOD(void, setFilterConfigName, (absl::string_view name));
+  MOCK_METHOD(OptRef<const Router::Route>, route, (), (const));
+  MOCK_METHOD(absl::optional<bool>, filterDisabled, (absl::string_view filter_name), (const));
+  MOCK_METHOD(const StreamInfo::StreamInfo&, streamInfo, (), (const));
+  MOCK_METHOD(RequestHeaderMapOptRef, requestHeaders, (), (const));
 };
 
 class MockFilterChainFactory : public FilterChainFactory {
@@ -211,13 +206,10 @@ public:
   ~MockFilterChainFactory() override;
 
   // Http::FilterChainFactory
-  bool createFilterChain(FilterChainManager& manager, const FilterChainOptions&) const override {
-    return createFilterChain(manager);
-  }
-  MOCK_METHOD(bool, createFilterChain, (FilterChainManager & manager), (const));
+  MOCK_METHOD(bool, createFilterChain, (FilterChainFactoryCallbacks & callbacks), (const));
   MOCK_METHOD(bool, createUpgradeFilterChain,
               (absl::string_view upgrade_type, const FilterChainFactory::UpgradeMap* upgrade_map,
-               FilterChainManager& manager, const FilterChainOptions&),
+               FilterChainFactoryCallbacks& callbacks),
               (const));
 };
 
@@ -277,10 +269,10 @@ public:
   MOCK_METHOD(void, onDecoderFilterBelowWriteBufferLowWatermark, ());
   MOCK_METHOD(void, addDownstreamWatermarkCallbacks, (DownstreamWatermarkCallbacks&));
   MOCK_METHOD(void, removeDownstreamWatermarkCallbacks, (DownstreamWatermarkCallbacks&));
-  MOCK_METHOD(void, setDecoderBufferLimit, (uint64_t));
-  MOCK_METHOD(uint64_t, decoderBufferLimit, ());
+  MOCK_METHOD(void, setBufferLimit, (uint64_t));
+  MOCK_METHOD(uint64_t, bufferLimit, ());
   MOCK_METHOD(bool, recreateStream, (const ResponseHeaderMap* headers));
-  MOCK_METHOD(void, sendGoAwayAndClose, ());
+  MOCK_METHOD(void, sendGoAwayAndClose, (bool graceful));
   MOCK_METHOD(void, addUpstreamSocketOptions, (const Network::Socket::OptionsSharedPtr& options));
   MOCK_METHOD(Network::Socket::OptionsSharedPtr, getUpstreamSocketOptions, (), (const));
   MOCK_METHOD(const Router::RouteSpecificFilterConfig*, mostSpecificPerFilterConfig, (), (const));
@@ -376,8 +368,8 @@ public:
   MOCK_METHOD(const ScopeTrackedObject&, scope, ());
   MOCK_METHOD(void, onEncoderFilterAboveWriteBufferHighWatermark, ());
   MOCK_METHOD(void, onEncoderFilterBelowWriteBufferLowWatermark, ());
-  MOCK_METHOD(void, setEncoderBufferLimit, (uint32_t));
-  MOCK_METHOD(uint32_t, encoderBufferLimit, ());
+  MOCK_METHOD(void, setBufferLimit, (uint64_t));
+  MOCK_METHOD(uint64_t, bufferLimit, ());
   MOCK_METHOD(void, restoreContextOnContinue, (ScopeTrackedObjectStack&));
   MOCK_METHOD(const Router::RouteSpecificFilterConfig*, mostSpecificPerFilterConfig, (), (const));
   MOCK_METHOD(Router::RouteSpecificFilterConfigs, perFilterConfigs, (), (const));
@@ -677,6 +669,8 @@ public:
   MOCK_METHOD(const std::string&, via, (), (const));
   MOCK_METHOD(Http::ForwardClientCertType, forwardClientCert, (), (const));
   MOCK_METHOD(const std::vector<Http::ClientCertDetailsType>&, setCurrentClientCertDetails, (),
+              (const));
+  MOCK_METHOD(const Matcher::MatchTreePtr<HttpMatchingData>&, forwardClientCertMatcher, (),
               (const));
   MOCK_METHOD(const Network::Address::Instance&, localAddress, ());
   MOCK_METHOD(const absl::optional<std::string>&, userAgent, ());

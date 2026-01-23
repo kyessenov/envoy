@@ -137,7 +137,8 @@ individual filter instance/script can be tracked by providing a per-filter
   :header: Name, Type, Description
   :widths: 1, 1, 2
 
-  error, Counter, Total script execution errors.
+  errors, Counter, Total script execution errors.
+  executions, Counter, Total number of times ``envoy_on_request`` and ``envoy_on_response`` was executed.
 
 Script examples
 ---------------
@@ -1353,6 +1354,20 @@ Connection object API
 
 ``ssl()``
 ^^^^^^^^^
+
+.. warning::
+
+  **DEPRECATED**: This method is deprecated and will be removed in a future release.
+  Use ``streamInfo():downstreamSslConnection()`` instead:
+
+  .. code-block:: lua
+
+    -- Preferred approach:
+    if handle:streamInfo():downstreamSslConnection() == nil then
+      print("plain")
+    else
+      print("secure")
+    end
 
 .. code-block:: lua
 

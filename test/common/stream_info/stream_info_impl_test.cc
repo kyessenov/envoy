@@ -44,7 +44,7 @@ protected:
         // with --config=docker-msan
         sizeof(stream_info) == 728 ||
         // with --config=docker-clang
-        sizeof(stream_info) == 736 ||
+        sizeof(stream_info) == 752 ||
         // with --config=docker-clang-libc++
         sizeof(stream_info) == 704)
         << "If adding fields to StreamInfoImpl, please check to see if you "
@@ -84,6 +84,10 @@ TEST_F(StreamInfoImplTest, TimingTest) {
   EXPECT_FALSE(timing.firstUpstreamRxByteReceived());
   upstream_timing.onFirstUpstreamRxByteReceived(test_time_.timeSystem());
   dur = checkDuration(dur, timing.firstUpstreamRxByteReceived());
+
+  EXPECT_FALSE(timing.firstUpstreamRxBodyByteReceived());
+  upstream_timing.onFirstUpstreamRxBodyByteReceived(test_time_.timeSystem());
+  dur = checkDuration(dur, timing.firstUpstreamRxBodyByteReceived());
 
   EXPECT_FALSE(timing.lastUpstreamRxByteReceived());
   upstream_timing.onLastUpstreamRxByteReceived(test_time_.timeSystem());
@@ -376,6 +380,14 @@ TEST_F(StreamInfoImplTest, MiscSettersAndGetters) {
     stream_info.setUpstreamInfo(new_info);
     EXPECT_EQ(stream_info.upstreamInfo(), new_info);
   }
+}
+
+TEST_F(StreamInfoImplTest, CodecStreamId) {
+  StreamInfoImpl stream_info(Http::Protocol::Http2, test_time_.timeSystem(), nullptr,
+                             FilterState::LifeSpan::FilterChain);
+  EXPECT_EQ(absl::nullopt, stream_info.codecStreamId());
+  stream_info.setCodecStreamId(12345);
+  EXPECT_EQ(12345, stream_info.codecStreamId());
 }
 
 TEST_F(StreamInfoImplTest, SetFromForRecreateStream) {

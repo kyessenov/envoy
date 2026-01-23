@@ -157,7 +157,11 @@ public:
   EngineBuilder& enableBrotliDecompression(bool brotli_decompression_on);
   EngineBuilder& enableSocketTagging(bool socket_tagging_on);
   EngineBuilder& enableHttp3(bool http3_on);
+  EngineBuilder& addQuicConnectionOption(std::string option);
+  EngineBuilder& addQuicClientConnectionOption(std::string option);
+  // Deprecated, use addQuicConnectionOption() instead.
   EngineBuilder& setHttp3ConnectionOptions(std::string options);
+  // Deprecated, use addQuicClientConnectionOption() instead.
   EngineBuilder& setHttp3ClientConnectionOptions(std::string options);
   EngineBuilder& addQuicHint(std::string host, int port);
   EngineBuilder& addQuicCanonicalSuffix(std::string suffix);
@@ -170,6 +174,15 @@ public:
   EngineBuilder& enforceTrustChainVerification(bool trust_chain_verification_on);
   EngineBuilder& setUpstreamTlsSni(std::string sni);
   EngineBuilder& enablePlatformCertificatesValidation(bool platform_certificates_validation_on);
+  EngineBuilder& setUseQuicPlatformPacketWriter(bool use_quic_platform_packet_writer);
+  // If called to enable QUIC connection migration, no need to call setUseQuicPlatformPacketWriter()
+  // separately.
+  EngineBuilder& enableQuicConnectionMigration(bool quic_connection_migration_on);
+  EngineBuilder& setMigrateIdleQuicConnection(bool migrate_idle_quic_connection);
+  // 0 means using the Envoy default 30s.
+  EngineBuilder& setMaxIdleTimeBeforeQuicMigrationSeconds(int max_idle_time_before_quic_migration);
+  // 0 means using the Envoy default 128s.
+  EngineBuilder& setMaxTimeOnNonDefaultNetworkSeconds(int max_time_on_non_default_network);
 
   EngineBuilder& enableDnsCache(bool dns_cache_on, int save_interval_seconds = 1);
   // Set additional socket options on the upstream cluster outbound sockets.
@@ -181,6 +194,8 @@ public:
   // TODO(abeyad): change this method and the other language APIs to take a {host,port} pair.
   // E.g. addDnsPreresolveHost(std::string host, uint32_t port);
   EngineBuilder& addDnsPreresolveHostnames(const std::vector<std::string>& hostnames);
+  EngineBuilder&
+  setDnsResolver(const envoy::config::core::v3::TypedExtensionConfig& dns_resolver_config);
   EngineBuilder& addNativeFilter(std::string name, std::string typed_config);
   EngineBuilder& addNativeFilter(const std::string& name, const Protobuf::Any& typed_config);
 
@@ -203,6 +218,9 @@ public:
   // The value must be an integer between -20 (highest priority) and 19 (lowest priority). Values
   // outside of this range will be ignored.
   EngineBuilder& setNetworkThreadPriority(int thread_priority);
+  // Sets the high watermark for the response buffer. The low watermark is set to half of this
+  // value. Defaults to 2MB if not set.
+  EngineBuilder& setBufferHighWatermark(size_t high_watermark);
 
   // Sets the QUIC connection idle timeout in seconds.
   EngineBuilder& setQuicConnectionIdleTimeoutSeconds(int quic_connection_idle_timeout_seconds);
@@ -288,6 +306,7 @@ private:
   bool dns_cache_on_ = false;
   int dns_cache_save_interval_seconds_ = 1;
   absl::optional<int> network_thread_priority_ = absl::nullopt;
+  absl::optional<size_t> high_watermark_ = absl::nullopt;
 
   absl::flat_hash_map<std::string, KeyValueStoreSharedPtr> key_value_stores_{};
 
@@ -298,6 +317,9 @@ private:
   bool enable_http3_ = true;
   std::string http3_connection_options_ = "";
   std::string http3_client_connection_options_ = "";
+  // EVMB is to distinguish Envoy Mobile client connections.
+  std::vector<std::string> quic_connection_options_{"AKDU", "BWRS", "5RTO", "EVMB"};
+  std::vector<std::string> quic_client_connection_options_;
   std::vector<std::pair<std::string, int>> quic_hints_;
   std::vector<std::string> quic_suffixes_;
   int num_timeouts_to_trigger_port_migration_ = 0;
@@ -311,6 +333,7 @@ private:
 
   std::vector<NativeFilterConfig> native_filter_chain_;
   std::vector<std::pair<std::string /* host */, uint32_t /* port */>> dns_preresolve_hostnames_;
+  absl::optional<envoy::config::core::v3::TypedExtensionConfig> dns_resolver_config_;
   std::vector<envoy::config::core::v3::SocketOption> socket_options_;
 
   std::vector<std::pair<std::string, bool>> runtime_guards_;
@@ -332,6 +355,13 @@ private:
 
   int keepalive_initial_interval_ms_ = 0;
   int max_concurrent_streams_ = 0;
+  bool use_quic_platform_packet_writer_ = false;
+
+  // QUIC connection migration.
+  bool enable_quic_connection_migration_ = false;
+  bool migrate_idle_quic_connection_ = false;
+  int max_idle_time_before_quic_migration_seconds_ = 0;
+  int max_time_on_non_default_network_seconds_ = 0;
 
   std::string node_id_;
   absl::optional<NodeLocality> node_locality_ = absl::nullopt;

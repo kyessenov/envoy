@@ -35,14 +35,31 @@ using OnHttpFilterStreamCompleteType =
 using OnHttpFilterDestroyType = decltype(&envoy_dynamic_module_on_http_filter_destroy);
 using OnHttpFilterHttpCalloutDoneType =
     decltype(&envoy_dynamic_module_on_http_filter_http_callout_done);
+using OnHttpFilterHttpStreamHeadersType =
+    decltype(&envoy_dynamic_module_on_http_filter_http_stream_headers);
+using OnHttpFilterHttpStreamDataType =
+    decltype(&envoy_dynamic_module_on_http_filter_http_stream_data);
+using OnHttpFilterHttpStreamTrailersType =
+    decltype(&envoy_dynamic_module_on_http_filter_http_stream_trailers);
+using OnHttpFilterHttpStreamCompleteType =
+    decltype(&envoy_dynamic_module_on_http_filter_http_stream_complete);
+using OnHttpFilterHttpStreamResetType =
+    decltype(&envoy_dynamic_module_on_http_filter_http_stream_reset);
 using OnHttpFilterScheduled = decltype(&envoy_dynamic_module_on_http_filter_scheduled);
+using OnHttpFilterDownstreamAboveWriteBufferHighWatermark =
+    decltype(&envoy_dynamic_module_on_http_filter_downstream_above_write_buffer_high_watermark);
+using OnHttpFilterDownstreamBelowWriteBufferLowWatermark =
+    decltype(&envoy_dynamic_module_on_http_filter_downstream_below_write_buffer_low_watermark);
+using OnHttpFilterLocalReplyType = decltype(&envoy_dynamic_module_on_http_filter_local_reply);
+using OnHttpFilterConfigScheduled = decltype(&envoy_dynamic_module_on_http_filter_config_scheduled);
 
 /**
  * A config to create http filters based on a dynamic module. This will be owned by multiple
  * filter instances. This resolves and holds the symbols used for the HTTP filters.
  * Each filter instance and the factory callback holds a shared pointer to this config.
  */
-class DynamicModuleHttpFilterConfig {
+class DynamicModuleHttpFilterConfig
+    : public std::enable_shared_from_this<DynamicModuleHttpFilterConfig> {
 public:
   /**
    * Constructor for the config.
@@ -75,15 +92,29 @@ public:
   OnHttpFilterStreamCompleteType on_http_filter_stream_complete_ = nullptr;
   OnHttpFilterDestroyType on_http_filter_destroy_ = nullptr;
   OnHttpFilterHttpCalloutDoneType on_http_filter_http_callout_done_ = nullptr;
+  OnHttpFilterHttpStreamHeadersType on_http_filter_http_stream_headers_ = nullptr;
+  OnHttpFilterHttpStreamDataType on_http_filter_http_stream_data_ = nullptr;
+  OnHttpFilterHttpStreamTrailersType on_http_filter_http_stream_trailers_ = nullptr;
+  OnHttpFilterHttpStreamCompleteType on_http_filter_http_stream_complete_ = nullptr;
+  OnHttpFilterHttpStreamResetType on_http_filter_http_stream_reset_ = nullptr;
   OnHttpFilterScheduled on_http_filter_scheduled_ = nullptr;
+  OnHttpFilterDownstreamAboveWriteBufferHighWatermark
+      on_http_filter_downstream_above_write_buffer_high_watermark_ = nullptr;
+  OnHttpFilterDownstreamBelowWriteBufferLowWatermark
+      on_http_filter_downstream_below_write_buffer_low_watermark_ = nullptr;
+  OnHttpFilterLocalReplyType on_http_filter_local_reply_ = nullptr;
+  OnHttpFilterConfigScheduled on_http_filter_config_scheduled_ = nullptr;
 
   Envoy::Upstream::ClusterManager& cluster_manager_;
+  Event::Dispatcher& main_thread_dispatcher_;
   const Stats::ScopeSharedPtr stats_scope_;
   Stats::StatNamePool stat_name_pool_;
   // We only allow the module to create stats during envoy_dynamic_module_on_http_filter_config_new,
   // and not later during request handling, so that we don't have to wrap the stat storage in a
   // lock.
   bool stat_creation_frozen_ = false;
+
+  bool terminal_filter_ = false;
 
   class ModuleCounterHandle {
   public:
@@ -277,6 +308,31 @@ private:
 
   // The handle for the module.
   Extensions::DynamicModules::DynamicModulePtr dynamic_module_;
+
+public:
+  /**
+   * This is called when an event is scheduled via DynamicModuleHttpFilterConfigScheduler::commit.
+   */
+  void onScheduled(uint64_t event_id);
+};
+
+class DynamicModuleHttpFilterConfigScheduler {
+public:
+  DynamicModuleHttpFilterConfigScheduler(std::weak_ptr<DynamicModuleHttpFilterConfig> config,
+                                         Event::Dispatcher& dispatcher)
+      : config_(std::move(config)), dispatcher_(dispatcher) {}
+
+  void commit(uint64_t event_id) {
+    dispatcher_.post([config = config_, event_id]() {
+      if (std::shared_ptr<DynamicModuleHttpFilterConfig> config_shared = config.lock()) {
+        config_shared->onScheduled(event_id);
+      }
+    });
+  }
+
+private:
+  std::weak_ptr<DynamicModuleHttpFilterConfig> config_;
+  Event::Dispatcher& dispatcher_;
 };
 
 class DynamicModuleHttpPerRouteFilterConfig : public Router::RouteSpecificFilterConfig {
@@ -314,8 +370,8 @@ newDynamicModuleHttpPerRouteConfig(const absl::string_view per_route_config_name
  */
 absl::StatusOr<DynamicModuleHttpFilterConfigSharedPtr> newDynamicModuleHttpFilterConfig(
     const absl::string_view filter_name, const absl::string_view filter_config,
-    Extensions::DynamicModules::DynamicModulePtr dynamic_module, Stats::Scope& stats_scope,
-    Server::Configuration::ServerFactoryContext& context);
+    const bool terminal_filter, Extensions::DynamicModules::DynamicModulePtr dynamic_module,
+    Stats::Scope& stats_scope, Server::Configuration::ServerFactoryContext& context);
 
 } // namespace HttpFilters
 } // namespace DynamicModules

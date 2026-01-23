@@ -32,7 +32,8 @@ class ActiveTcpSocket : public Network::ListenerFilterManager,
                         Logger::Loggable<Logger::Id::conn_handler> {
 public:
   ActiveTcpSocket(ActiveStreamListenerBase& listener, Network::ConnectionSocketPtr&& socket,
-                  bool hand_off_restored_destination_connections);
+                  bool hand_off_restored_destination_connections,
+                  const absl::optional<std::string>& network_namespace);
   ~ActiveTcpSocket() override;
 
   void onTimeout();
@@ -84,7 +85,11 @@ public:
     return stream_info_->dynamicMetadata();
   };
   StreamInfo::FilterState& filterState() override { return *stream_info_->filterState().get(); }
-  StreamInfo::StreamInfo* streamInfo() const { return stream_info_.get(); }
+  StreamInfo::StreamInfo& streamInfo() override {
+    ASSERT(stream_info_ != nullptr);
+    return *stream_info_;
+  }
+  StreamInfo::StreamInfo* streamInfoPtr() const { return stream_info_.get(); }
   bool connected() const { return connected_; }
   bool isEndFilterIteration() const { return iter_ == accept_filters_.end(); }
 

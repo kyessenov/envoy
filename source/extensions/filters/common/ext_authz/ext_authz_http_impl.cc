@@ -52,6 +52,13 @@ const Response& errorResponse() {
                                             Protobuf::Struct{}});
 }
 
+// Static matcher that never matches anything. Used for matchers that are not applicable
+// in certain response contexts (e.g., upstream headers for denied responses).
+const MatcherSharedPtr& neverMatchingMatcher() {
+  CONSTRUCT_ON_FIRST_USE(MatcherSharedPtr, std::make_shared<HeaderKeyMatcher>(
+                                               std::vector<Matchers::StringMatcherPtr>{}));
+}
+
 // SuccessResponse used for creating either DENIED or OK authorization responses.
 struct SuccessResponse {
   SuccessResponse(const Http::HeaderMap& headers, const MatcherSharedPtr& matchers,
@@ -112,9 +119,16 @@ absl::StatusOr<Router::RetryPolicyConstSharedPtr>
 createRetryPolicy(const envoy::config::core::v3::RetryPolicy& core_retry_policy,
                   Server::Configuration::CommonFactoryContext& context) {
   // Convert core retry policy to route retry policy and create the implementation.
+  // By default when runtime flag is true, pass empty string to respect user's configured
+  // retry_on, not override it. When flag is false, use hardcoded defaults for backwards
+  // compatibility.
+  const std::string default_retry_on =
+      Runtime::runtimeFeatureEnabled(
+          "envoy.reloadable_features.ext_authz_http_client_retries_respect_user_retry_on")
+          ? ""
+          : "5xx,gateway-error,connect-failure,reset";
   envoy::config::route::v3::RetryPolicy route_retry_policy =
-      Http::Utility::convertCoreToRouteRetryPolicy(core_retry_policy,
-                                                   "5xx,gateway-error,connect-failure,reset");
+      Http::Utility::convertCoreToRouteRetryPolicy(core_retry_policy, default_retry_on);
 
   return Router::RetryPolicyImpl::create(route_retry_policy, context.messageValidationVisitor(),
                                          context);
@@ -427,10 +441,13 @@ ResponsePtr RawHttpClientImpl::toResponse(Http::ResponseMessagePtr message) {
   }
 
   // Create a Denied authorization response.
+  // For denied responses, only headers_to_set which is populated by the first matcher is
+  // used by the ext_authz filter when sending the local reply. The headers_to_add and
+  // response_headers_to_add fields are not used, so we pass a never-matching matcher.
   SuccessResponse denied{message->headers(),
                          config_->clientHeaderMatchers(),
-                         config_->upstreamHeaderToAppendMatchers(),
-                         config_->clientHeaderOnSuccessMatchers(),
+                         neverMatchingMatcher(),
+                         neverMatchingMatcher(),
                          config_->dynamicMetadataMatchers(),
                          Response{CheckStatus::Denied,
                                   UnsafeHeaderVector{},

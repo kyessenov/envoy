@@ -23,6 +23,8 @@ envoy_cc_test(
         "//test/extensions/dynamic_modules/test_data/c:abi_version_mismatch",
         "//test/extensions/dynamic_modules/test_data/c:no_op",
         "//test/extensions/dynamic_modules/test_data/c:no_program_init",
+        "//test/extensions/dynamic_modules/test_data/c:program_child",
+        "//test/extensions/dynamic_modules/test_data/c:program_global",
         "//test/extensions/dynamic_modules/test_data/c:program_init_assert",
         "//test/extensions/dynamic_modules/test_data/c:program_init_fail",
         "//test/extensions/dynamic_modules/test_data/rust:abi_version_mismatch",
@@ -30,9 +32,12 @@ envoy_cc_test(
         "//test/extensions/dynamic_modules/test_data/rust:no_program_init",
         "//test/extensions/dynamic_modules/test_data/rust:program_init_fail",
     ],
+    # This is to test dlopen with the current working directory (rundir in Bazel).
+    env = {"LD_LIBRARY_PATH": "."},
     rbe_pool = "6gig",
     deps = [
         ":util",
+        "//source/extensions/dynamic_modules:abi_impl",
         "//source/extensions/dynamic_modules:dynamic_modules_lib",
     ],
 )
@@ -49,6 +54,15 @@ envoy_cc_test(
         "//source/common/crypto:utility_lib",
         "//source/extensions/dynamic_modules:abi_version_lib",
         "//test/test_common:environment_lib",
+        "//test/test_common:utility_lib",
+    ],
+)
+
+envoy_cc_test(
+    name = "abi_impl_test",
+    srcs = ["abi_impl_test.cc"],
+    deps = [
+        "//source/extensions/dynamic_modules:abi_impl",
         "//test/test_common:utility_lib",
     ],
 )
@@ -84,7 +98,10 @@ rust_test(
 rust_doc_test(
     name = "rust_sdk_doc_test",
     crate = "//source/extensions/dynamic_modules/sdk/rust:envoy_proxy_dynamic_modules_rust_sdk",
-    tags = ["nocoverage"],
+    tags = [
+        "no_san",
+        "nocoverage",
+    ],
 )
 
 # As per the discussion in https://github.com/envoyproxy/envoy/pull/35627,

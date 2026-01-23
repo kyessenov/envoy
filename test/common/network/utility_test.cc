@@ -558,6 +558,15 @@ TEST(NetworkUtility, ParseProtobufAddress) {
   }
   {
     envoy::config::core::v3::Address proto_address;
+    proto_address.mutable_socket_address()->set_address("::1");
+    proto_address.mutable_socket_address()->set_port_value(1234);
+    proto_address.mutable_socket_address()->set_network_namespace_filepath("/proc/test-ns/ns/net");
+    EXPECT_EQ("[::1]:1234", Utility::protobufAddressToAddressNoThrow(proto_address)->asString());
+    EXPECT_EQ("/proc/test-ns/ns/net",
+              Utility::protobufAddressToAddressNoThrow(proto_address)->networkNamespace().value());
+  }
+  {
+    envoy::config::core::v3::Address proto_address;
     proto_address.mutable_pipe()->set_path("/tmp/unix-socket");
     EXPECT_EQ("/tmp/unix-socket",
               Utility::protobufAddressToAddressNoThrow(proto_address)->asString());
@@ -602,6 +611,15 @@ TEST(NetworkUtility, AddressToProtobufAddress) {
     EXPECT_TRUE(proto_address.has_envoy_internal_address());
     EXPECT_EQ("internal_address", proto_address.envoy_internal_address().server_listener_name());
     EXPECT_EQ("endpoint_id", proto_address.envoy_internal_address().endpoint_id());
+  }
+  {
+    envoy::config::core::v3::Address proto_address;
+    Address::Ipv6Instance address("::1", 1234, nullptr, true, "/proc/1234/ns/net");
+    Utility::addressToProtobufAddress(address, proto_address);
+    EXPECT_TRUE(proto_address.has_socket_address());
+    EXPECT_EQ("::1", proto_address.socket_address().address());
+    EXPECT_EQ(1234, proto_address.socket_address().port_value());
+    EXPECT_EQ("/proc/1234/ns/net", proto_address.socket_address().network_namespace_filepath());
   }
 }
 
@@ -690,6 +708,15 @@ TEST(ResolvedUdpSocketConfig, Warning) {
 
 #ifndef WIN32
 TEST(PacketLoss, LossTest) {
+  class ZeroTimeSource : public TimeSource {
+  public:
+    ZeroTimeSource() = default;
+    ~ZeroTimeSource() override = default;
+
+    SystemTime systemTime() override { return SystemTime(std::chrono::seconds(0)); }
+    MonotonicTime monotonicTime() override { return MonotonicTime(std::chrono::seconds(0)); }
+  };
+
   // Create and bind a UDP socket.
   auto version = TestEnvironment::getIpVersionsForTest()[0];
   auto kernel_version = version == Network::Address::IpVersion::v4 ? AF_INET : AF_INET6;
@@ -725,16 +752,16 @@ TEST(PacketLoss, LossTest) {
   NiceMock<MockUdpPacketProcessor> processor;
   IoHandle::UdpSaveCmsgConfig udp_save_cmsg_config;
   ON_CALL(processor, saveCmsgConfig()).WillByDefault(ReturnRef(udp_save_cmsg_config));
-  MonotonicTime time(std::chrono::seconds(0));
   uint32_t packets_dropped = 0;
   UdpRecvMsgMethod recv_msg_method = UdpRecvMsgMethod::RecvMsg;
   if (Api::OsSysCallsSingleton::get().supportsMmsg()) {
     recv_msg_method = UdpRecvMsgMethod::RecvMmsg;
   }
 
+  ZeroTimeSource time_source;
   uint32_t packets_read = 0;
-  Utility::readFromSocket(handle, *address, processor, time, recv_msg_method, &packets_dropped,
-                          &packets_read);
+  Utility::readFromSocket(handle, *address, processor, time_source, recv_msg_method,
+                          &packets_dropped, &packets_read);
   EXPECT_EQ(1, packets_dropped);
   EXPECT_EQ(0, packets_read);
 
@@ -743,8 +770,8 @@ TEST(PacketLoss, LossTest) {
                                         reinterpret_cast<sockaddr*>(&storage), sizeof(storage)));
 
   // Make sure the drop count is now 2.
-  Utility::readFromSocket(handle, *address, processor, time, recv_msg_method, &packets_dropped,
-                          &packets_read);
+  Utility::readFromSocket(handle, *address, processor, time_source, recv_msg_method,
+                          &packets_dropped, &packets_read);
   EXPECT_EQ(2, packets_dropped);
   EXPECT_EQ(0, packets_read);
 }

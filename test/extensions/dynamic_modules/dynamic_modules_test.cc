@@ -33,8 +33,7 @@ TEST_P(DynamicModuleTestLanguages, DoNotClose) {
 
   // Release the module, and reload it.
   module->reset();
-  module = newDynamicModule(testSharedObjectPath("no_op", language),
-                            true); // This time, do not close the module.
+  module = newDynamicModule(testSharedObjectPath("no_op", language), true);
   EXPECT_TRUE(module.ok());
 
   // This module must be reloaded and the variable must be reset.
@@ -78,6 +77,23 @@ TEST(DynamicModuleTestLanguages, InitFunctionOnlyCalledOnce) {
   EXPECT_TRUE(m2.ok());
 }
 
+TEST(DynamicModuleTestLanguages, LoadLibGlobally) {
+  const auto path = testSharedObjectPath("program_global", "c");
+  absl::StatusOr<DynamicModulePtr> module = newDynamicModule(path, false, true);
+  EXPECT_TRUE(module.ok());
+
+  // The child module should be able to access the symbol from the global module.
+  const auto child_path = testSharedObjectPath("program_child", "c");
+  absl::StatusOr<DynamicModulePtr> child_module = newDynamicModule(child_path, false, false);
+  EXPECT_TRUE(child_module.ok());
+
+  using GetSomeVariableFuncType = int (*)(void);
+  const auto getSomeVariable =
+      child_module->get()->getFunctionPointer<GetSomeVariableFuncType>("getSomeVariable");
+  EXPECT_TRUE(getSomeVariable.ok());
+  EXPECT_EQ(getSomeVariable.value()(), 42);
+}
+
 TEST_P(DynamicModuleTestLanguages, NoProgramInit) {
   std::string language = GetParam();
   absl::StatusOr<DynamicModulePtr> result =
@@ -108,7 +124,7 @@ TEST_P(DynamicModuleTestLanguages, ABIVersionMismatch) {
               testing::HasSubstr("ABI version mismatch: got invalid-version-hash, but expected"));
 }
 
-TEST(CreateDynamicModulesByName, OK) {
+TEST(CreateDynamicModulesByName, EnvoyDynamicModulesSearchPathSet) {
   TestEnvironment::setEnvVar(
       "ENVOY_DYNAMIC_MODULES_SEARCH_PATH",
       TestEnvironment::substitute(
@@ -116,17 +132,40 @@ TEST(CreateDynamicModulesByName, OK) {
       1);
 
   absl::StatusOr<DynamicModulePtr> module = newDynamicModuleByName("no_op", false);
-  EXPECT_TRUE(module.ok());
+  EXPECT_TRUE(module.ok()) << "Failed to load module: " << module.status().message();
   TestEnvironment::unsetEnvVar("ENVOY_DYNAMIC_MODULES_SEARCH_PATH");
 }
 
-TEST(CreateDynamicModulesByName, EnvVarNotSet) {
-  // Without setting the search path, this should fail.
+TEST(CreateDynamicModulesByName, EnvoyDynamicModulesSearchPathNotSetFallbackToCwd) {
+  std::filesystem::path test_lib = testSharedObjectPath("no_op", "c");
+  std::filesystem::path staged_lib = TestEnvironment::substitute("{{ test_rundir }}/libfoo.so");
+  std::filesystem::copy(test_lib, staged_lib);
+  absl::StatusOr<DynamicModulePtr> module = newDynamicModuleByName("foo", false);
+  EXPECT_TRUE(module.ok()) << "Failed to load module: " << module.status().message();
+  std::filesystem::remove(staged_lib);
+}
+
+TEST(CreateDynamicModulesByName, DlopenDefaultSearchPath) {
+  TestEnvironment::setEnvVar("ENVOY_DYNAMIC_MODULES_SEARCH_PATH", "/should/not/find/this/path", 1);
+
+  std::filesystem::path test_lib = testSharedObjectPath("no_op", "c");
+  std::filesystem::path staged_lib =
+      TestEnvironment::substitute("{{ test_rundir }}/libwhatever.so");
+  std::filesystem::copy(test_lib, staged_lib);
+  absl::StatusOr<DynamicModulePtr> module = newDynamicModuleByName("whatever", false);
+  EXPECT_TRUE(module.ok()) << "Failed to load module: " << module.status().message();
+
+  TestEnvironment::unsetEnvVar("ENVOY_DYNAMIC_MODULES_SEARCH_PATH");
+  std::filesystem::remove(staged_lib);
+}
+
+TEST(CreateDynamicModulesByName, ModuleNotFound) {
   absl::StatusOr<DynamicModulePtr> module = newDynamicModuleByName("no_op", false);
   EXPECT_FALSE(module.ok());
   EXPECT_EQ(module.status().code(), absl::StatusCode::kInvalidArgument);
   EXPECT_THAT(module.status().message(),
-              testing::HasSubstr("ENVOY_DYNAMIC_MODULES_SEARCH_PATH is not set"));
+              testing::HasSubstr(
+                  "Failed to load dynamic module: libno_op.so not found in any search path"));
 }
 
 } // namespace DynamicModules

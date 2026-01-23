@@ -7,6 +7,7 @@
 #include "source/common/upstream/transport_socket_match_impl.h"
 
 #include "test/common/http/common.h"
+#include "test/common/quic/test_utils.h"
 #include "test/common/upstream/utility.h"
 #include "test/mocks/common.h"
 #include "test/mocks/event/mocks.h"
@@ -182,7 +183,8 @@ public:
   void initialize() {
     quic_connection_persistent_info_ =
 #ifdef ENVOY_ENABLE_QUIC
-        std::make_unique<Quic::PersistentQuicInfoImpl>(dispatcher_, 0);
+        Quic::createPersistentQuicInfoForCluster(dispatcher_, *cluster_,
+                                                 factory_context_.server_context_);
 #else
         std::make_unique<PersistentQuicInfo>();
 #endif
@@ -247,7 +249,7 @@ public:
   testing::NiceMock<ThreadLocal::MockInstance> thread_local_;
   NiceMock<Event::MockDispatcher> dispatcher_;
 
-  Quic::EnvoyQuicNetworkObserverRegistry registry_;
+  Quic::TestNetworkObserverRegistry registry_;
   std::unique_ptr<ConnectivityGridForTest> grid_;
   std::string host_impl_hostname_ = "hostname";
 };
@@ -257,7 +259,7 @@ TEST_F(ConnectivityGridTest, HostnameFromTransportSocketFactory) {
   Upstream::MockTransportSocketMatcher* transport_socket_matcher =
       dynamic_cast<Upstream::MockTransportSocketMatcher*>(
           cluster_->transport_socket_matcher_.get());
-  EXPECT_CALL(*transport_socket_matcher, resolve(_, _))
+  EXPECT_CALL(*transport_socket_matcher, resolve(_, _, _))
       .WillOnce(Return(Upstream::TransportSocketMatcher::MatchData(
           factory, transport_socket_matcher->stats_, "test")));
   EXPECT_CALL(factory, defaultServerNameIndication)
@@ -1729,7 +1731,7 @@ TEST_F(ConnectivityGridTest, RealGrid) {
   factory->initialize();
   auto& matcher =
       static_cast<Upstream::MockTransportSocketMatcher&>(*cluster_->transport_socket_matcher_);
-  EXPECT_CALL(matcher, resolve(_, _))
+  EXPECT_CALL(matcher, resolve(_, _, _))
       .WillRepeatedly(
           Return(Upstream::TransportSocketMatcher::MatchData(*factory, matcher.stats_, "test")));
 
@@ -1769,7 +1771,7 @@ TEST_F(ConnectivityGridTest, ConnectionCloseDuringAsyncConnect) {
   factory->initialize();
   auto& matcher =
       static_cast<Upstream::MockTransportSocketMatcher&>(*cluster_->transport_socket_matcher_);
-  EXPECT_CALL(matcher, resolve(_, _))
+  EXPECT_CALL(matcher, resolve(_, _, _))
       .WillRepeatedly(
           Return(Upstream::TransportSocketMatcher::MatchData(*factory, matcher.stats_, "test")));
 
