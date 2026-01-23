@@ -283,9 +283,14 @@ public:
   virtual bool flushAccessLogsOnStart() const PURE;
 
   /**
-   * @return bool whether the access logs are flushed when the transport socket becomes ready.
+   * @return bool whether the access logs are flushed when the TCP connection ends.
    */
-  virtual bool flushAccessLogsOnConnected() const PURE;
+  virtual bool flushAccessLogsOnEnd() const PURE;
+
+  /**
+   * @return bool whether the access logs are flushed when the TCP connection fails to start.
+   */
+  virtual bool flushAccessLogsOnFailure() const PURE;
 
   /**
    * @return pending connection backlog for TCP listeners.
