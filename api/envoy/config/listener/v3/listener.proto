@@ -138,10 +138,12 @@ message Listener {
   }
 
   message AccessLogOptions {
-    // If set to true, the access log is flushed when a TCP connection starts.
+    // If set to true, the access log is flushed when the TCP connection starts.
     bool flush_access_log_on_start = 1;
-    // If set to true, the access log is flushed when the transport socket becomes ready, e.g. when a TLS handshake succeeds.
-    bool flush_access_log_on_transport_connected = 2;
+    // If set to true, the access log is flushed when the TCP connection ends after starting.
+    bool flush_access_log_on_end = 2;
+    // If set to true, the access log is flushed when TCP connection failed to start.
+    bool flush_access_log_on_failure = 3;
   }
 
   reserved 14, 23;
@@ -383,7 +385,8 @@ message Listener {
   // configuration.
   repeated accesslog.v3.AccessLog access_log = 22;
 
-  // Additional access log options for the listener.
+  // Additional access log options for the listener. If not set, the log is emitted when the TCP
+  // connection ends or fails to start.
   AccessLogOptions access_log_options = 37;
 
   // The maximum length a tcp listener's pending connections queue can grow to. If no value is

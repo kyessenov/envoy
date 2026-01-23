@@ -16,37 +16,12 @@ minor_behavior_changes:
 # *Changes that may cause incompatibilities for some users, but should not for most*
 - area: histograms
   change: |
-<<<<<<< HEAD
-    Added :ref:`host_rewrite
-    <envoy_v3_api_field_config.route.v3.RouteAction.host_rewrite>` to
-    :ref:`RouteAction <envoy_v3_api_msg_config.route.v3.RouteAction>` to support substitution
-    formatting for host header rewriting.
-    Added :ref:`path_rewrite
-    <envoy_v3_api_field_config.route.v3.RouteAction.path_rewrite>` to
-    :ref:`RouteAction <envoy_v3_api_msg_config.route.v3.RouteAction>` to support substitution
-    formatting for path header rewriting.
-- area: ext_proc
-  change: |
-    Use one of a hard-coded set of error messages when a :ref:`HeaderMutation
-    <envoy_v3_api_msg_service.ext_proc.v3.HeaderMutation>` fails. Removing
-    request-specific details allows grouping by similar failure types. Detailed
-    messages remain available in debug logs.
-- area: ext_authz
-  change: |
-    Check the response header count is < the configured limits before applying mutations and don't
-    add new headers if not.
-- area: mobile
-  change: |
-    Use mobile specific network observer registries to propagate network change signals. This behavior can be reverted by
-    setting the runtime guard ``envoy.reloadable_features.mobile_use_network_observer_registry``.
-- area: logging
-  change: |
-    Listener access log entries now have their entry type set to ``TcpConnectionEnd`` or ``NotConnected``.
-=======
     Update of libcircllhist to 0.3.2 has changed how bucket bounds are interpreted. This should not have an impact on
     production monitoring if the number of samples in the histograms is high. Affected tests were adjusted to account for
     histogram changes.
->>>>>>> upstream/main
+- area: logging
+  change: |
+    Listener access log entries now have their entry type set to ``TcpConnectionEnd`` or ``TcpNotConnected``.
 
 bug_fixes:
 # *Changes expected to improve the state of the world and are unlikely to have negative effects*
@@ -86,17 +61,8 @@ new_features:
     ``resources/subscribe``, and ``resources/unsubscribe``.
 - area: mcp_router
   change: |
-<<<<<<< HEAD
-    Added support for not-equal operator for access log filter rules, in
-    :ref:`ComparisonFilter <envoy_v3_api_msg_config.accesslog.v3.ComparisonFilter>`.
-- area: logging
-  change: |
-    Added support to flush access logs in the listener on the start of the connections.
-- area: cel
-=======
     Added support for MCP prompt methods ``prompts/list`` and ``prompts/get``.
 - area: mcp_router
->>>>>>> upstream/main
   change: |
     Added support for MCP client-to-server notification methods ``notifications/cancelled``
     and ``notifications/roots/list_changed``.
@@ -112,5 +78,8 @@ new_features:
   change: |
     Added ``%DOWNSTREAM_DETECTED_CLOSE_TYPE%`` to expose the detected close type
     of downstream and connections. The possible values are ``Normal``, ``LocalReset``, and ``RemoteReset``.
+- area: logging
+  change: |
+    Added support to flush access logs in the listener on the start of the connections.
 
 deprecated:
