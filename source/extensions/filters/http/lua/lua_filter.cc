@@ -29,48 +29,52 @@ namespace Lua {
 namespace {
 
 using OptionHandler =
-    std::function<void(lua_State* state, StreamHandleWrapper::HttpCallOptions& options)>;
+    std::function<absl::Status(lua_State* state, StreamHandleWrapper::HttpCallOptions& options)>;
 using OptionHandlers = std::map<absl::string_view, OptionHandler>;
 
 const OptionHandlers& optionHandlers() {
-  CONSTRUCT_ON_FIRST_USE(OptionHandlers,
-                         {
-                             {"asynchronous",
-                              [](lua_State* state, StreamHandleWrapper::HttpCallOptions& options) {
-                                // Handle the case when the table has: {["asynchronous"] =
-                                // <boolean>} entry.
-                                options.is_async_request_ = lua_toboolean(state, -1);
-                              }},
-                             {"timeout_ms",
-                              [](lua_State* state, StreamHandleWrapper::HttpCallOptions& options) {
-                                // Handle the case when the table has: {["timeout_ms"] = <int>}
-                                // entry.
-                                const int timeout_ms = luaL_checkint(state, -1);
-                                if (timeout_ms < 0) {
-                                  luaL_error(state, "http call timeout must be >= 0");
-                                } else {
-                                  options.request_options_.setTimeout(
-                                      std::chrono::milliseconds(timeout_ms));
-                                }
-                              }},
-                             {"trace_sampled",
-                              [](lua_State* state, StreamHandleWrapper::HttpCallOptions& options) {
-                                const bool sampled = lua_toboolean(state, -1);
-                                options.request_options_.setSampled(sampled);
-                              }},
-                             {"return_duplicate_headers",
-                              [](lua_State* state, StreamHandleWrapper::HttpCallOptions& options) {
-                                // Handle the case when the table has: {["return_duplicate_headers"]
-                                // = <boolean>} entry.
-                                options.return_duplicate_headers_ = lua_toboolean(state, -1);
-                              }},
-                             {"send_xff",
-                              [](lua_State* state, StreamHandleWrapper::HttpCallOptions& options) {
-                                // Handle the case when the table has: {["send_xff"] =
-                                // <boolean>} entry.
-                                options.request_options_.setSendXff(lua_toboolean(state, -1));
-                              }},
-                         });
+  CONSTRUCT_ON_FIRST_USE(
+      OptionHandlers,
+      {
+          {"asynchronous",
+           [](lua_State* state, StreamHandleWrapper::HttpCallOptions& options) -> absl::Status {
+             // Handle the case when the table has: {["asynchronous"] =
+             // <boolean>} entry.
+             options.is_async_request_ = lua_toboolean(state, -1);
+             return absl::OkStatus();
+           }},
+          {"timeout_ms",
+           [](lua_State* state, StreamHandleWrapper::HttpCallOptions& options) -> absl::Status {
+             // Handle the case when the table has: {["timeout_ms"] = <int>}
+             // entry.
+             const int timeout_ms = luaL_checkint(state, -1);
+             if (timeout_ms < 0) {
+               return absl::InvalidArgumentError("http call timeout must be >= 0");
+             }
+             options.request_options_.setTimeout(std::chrono::milliseconds(timeout_ms));
+             return absl::OkStatus();
+           }},
+          {"trace_sampled",
+           [](lua_State* state, StreamHandleWrapper::HttpCallOptions& options) -> absl::Status {
+             const bool sampled = lua_toboolean(state, -1);
+             options.request_options_.setSampled(sampled);
+             return absl::OkStatus();
+           }},
+          {"return_duplicate_headers",
+           [](lua_State* state, StreamHandleWrapper::HttpCallOptions& options) -> absl::Status {
+             // Handle the case when the table has: {["return_duplicate_headers"]
+             // = <boolean>} entry.
+             options.return_duplicate_headers_ = lua_toboolean(state, -1);
+             return absl::OkStatus();
+           }},
+          {"send_xff",
+           [](lua_State* state, StreamHandleWrapper::HttpCallOptions& options) -> absl::Status {
+             // Handle the case when the table has: {["send_xff"] =
+             // <boolean>} entry.
+             options.request_options_.setSendXff(lua_toboolean(state, -1));
+             return absl::OkStatus();
+           }},
+      });
 }
 
 constexpr int AsyncFlagIndex = 6;
@@ -82,8 +86,8 @@ struct HttpResponseCodeDetailValues {
 using HttpResponseCodeDetails = ConstSingleton<HttpResponseCodeDetailValues>;
 
 // Parse http call options by inspecting the provided table.
-void parseOptionsFromTable(lua_State* state, int index,
-                           StreamHandleWrapper::HttpCallOptions& options) {
+absl::Status parseOptionsFromTable(lua_State* state, int index,
+                                   StreamHandleWrapper::HttpCallOptions& options) {
   const auto& handlers = optionHandlers();
 
   lua_pushnil(state);
@@ -97,14 +101,21 @@ void parseOptionsFromTable(lua_State* state, int index,
 
     auto iter = handlers.find(absl::string_view(key, key_length));
     if (iter != handlers.end()) {
-      iter->second(state, options);
+      absl::Status status = iter->second(state, options);
+      if (!status.ok()) {
+        lua_pop(state, 2);
+        return status;
+      }
     } else {
-      luaL_error(state, "\"%s\" is not valid key for httpCall() options", key);
+      std::string error_msg = absl::StrCat("\"", key, "\" is not valid key for httpCall() options");
+      lua_pop(state, 2);
+      return absl::InvalidArgumentError(error_msg);
     }
 
     // Pop value of key/value pair.
     lua_pop(state, 1);
   }
+  return absl::OkStatus();
 }
 
 const Protobuf::Struct& getMetadata(Http::StreamFilterCallbacks* callbacks) {
@@ -161,16 +172,15 @@ void buildHeadersFromTable(Http::HeaderMap& headers, lua_State* state, int table
   }
 }
 
-Http::AsyncClient::Request* makeHttpCall(lua_State* state, Filter& filter,
-                                         const Http::AsyncClient::RequestOptions& options,
-                                         Http::AsyncClient::Callbacks& callbacks) {
+absl::StatusOr<Http::AsyncClient::Request*>
+makeHttpCall(lua_State* state, Filter& filter, const Http::AsyncClient::RequestOptions& options,
+             Http::AsyncClient::Callbacks& callbacks) {
   const std::string cluster = luaL_checkstring(state, 2);
   luaL_checktype(state, 3, LUA_TTABLE);
 
   const auto thread_local_cluster = filter.clusterManager().getThreadLocalCluster(cluster);
   if (thread_local_cluster == nullptr) {
-    luaL_error(state, "http call cluster invalid. Must be configured");
-    return nullptr;
+    return absl::InvalidArgumentError("http call cluster invalid. Must be configured");
   }
 
   auto headers = Http::RequestHeaderMapImpl::create();
@@ -180,8 +190,8 @@ Http::AsyncClient::Request* makeHttpCall(lua_State* state, Filter& filter,
   // Check that we were provided certain headers.
   if (message->headers().Path() == nullptr || message->headers().Method() == nullptr ||
       message->headers().Host() == nullptr) {
-    luaL_error(state, "http call headers must include ':path', ':method', and ':authority'");
-    return nullptr;
+    return absl::InvalidArgumentError(
+        "http call headers must include ':path', ':method', and ':authority'");
   }
 
   size_t body_size;
@@ -323,7 +333,12 @@ Http::FilterDataStatus StreamHandleWrapper::onData(Buffer::Instance& data, bool 
     ENVOY_LOG(debug, "resuming body due to end stream");
     callbacks_.addData(data);
     state_ = State::Running;
-    coroutine_status_ = resumeCoroutine(luaBody(coroutine_.luaState()), yield_callback_);
+    const auto num_args = luaBody(coroutine_.luaState());
+    if (!num_args.ok()) {
+      coroutine_status_ = num_args.status();
+    } else {
+      coroutine_status_ = resumeCoroutine(*num_args, yield_callback_);
+    }
   } else if (state_ == State::WaitForTrailers && end_stream_) {
     ENVOY_LOG(debug, "resuming nil trailers due to end stream");
     state_ = State::Running;
@@ -360,13 +375,23 @@ Http::FilterTrailersStatus StreamHandleWrapper::onTrailers(Http::HeaderMap& trai
   } else if (state_ == State::WaitForBody) {
     ENVOY_LOG(debug, "resuming body due to trailers");
     state_ = State::Running;
-    coroutine_status_ = resumeCoroutine(luaBody(coroutine_.luaState()), yield_callback_);
+    const auto num_args = luaBody(coroutine_.luaState());
+    if (!num_args.ok()) {
+      coroutine_status_ = num_args.status();
+    } else {
+      coroutine_status_ = resumeCoroutine(*num_args, yield_callback_);
+    }
   }
 
   if (coroutine_status_.ok() && state_ == State::WaitForTrailers) {
     // Mimic a call to trailers which will push the trailers onto the stack and then resume.
     state_ = State::Running;
-    coroutine_status_ = resumeCoroutine(luaTrailers(coroutine_.luaState()), yield_callback_);
+    const auto num_args = luaTrailers(coroutine_.luaState());
+    if (!num_args.ok()) {
+      coroutine_status_ = num_args.status();
+    } else {
+      coroutine_status_ = resumeCoroutine(*num_args, yield_callback_);
+    }
   }
 
   if (!coroutine_status_.ok()) {
@@ -385,11 +410,11 @@ Http::FilterTrailersStatus StreamHandleWrapper::onTrailers(Http::HeaderMap& trai
   return status;
 }
 
-int StreamHandleWrapper::luaRespond(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaRespond(lua_State* state) {
   ASSERT(state_ == State::Running);
 
   if (headers_continued_) {
-    luaL_error(state, "respond() cannot be called if headers have been continued");
+    return absl::InvalidArgumentError("respond() cannot be called if headers have been continued");
   }
 
   luaL_checktype(state, 2, LUA_TTABLE);
@@ -400,7 +425,7 @@ int StreamHandleWrapper::luaRespond(lua_State* state) {
 
   uint64_t status;
   if (!absl::SimpleAtoi(headers->getStatusValue(), &status) || status < 200 || status >= 600) {
-    luaL_error(state, ":status must be between 200-599");
+    return absl::InvalidArgumentError(":status must be between 200-599");
   }
 
   Buffer::InstancePtr body;
@@ -411,12 +436,12 @@ int StreamHandleWrapper::luaRespond(lua_State* state) {
 
   // Once we respond we treat that as the end of the script even if there is more code. Thus we
   // yield.
-  callbacks_.respond(std::move(headers), body.get(), state);
+  RETURN_IF_NOT_OK(callbacks_.respond(std::move(headers), body.get(), state));
   state_ = State::Responded;
   return lua_yield(state, 0);
 }
 
-int StreamHandleWrapper::luaHttpCall(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaHttpCall(lua_State* state) {
   ASSERT(state_ == State::Running);
 
   StreamHandleWrapper::HttpCallOptions options;
@@ -430,16 +455,17 @@ int StreamHandleWrapper::luaHttpCall(lua_State* state) {
   // Check if the last argument is table of options. For example:
   // handle:httpCall(cluster, headers, body, {["timeout"] = 200, ...}).
   if (const bool has_options = lua_istable(state, HttpCallOptionsIndex); has_options) {
-    parseOptionsFromTable(state, HttpCallOptionsIndex, options);
+    RETURN_IF_NOT_OK(parseOptionsFromTable(state, HttpCallOptionsIndex, options));
   } else {
     if (!lua_isnone(state, AsyncFlagIndex) && !lua_isboolean(state, AsyncFlagIndex)) {
-      luaL_error(state, "http call asynchronous flag must be 'true', 'false', or empty");
+      return absl::InvalidArgumentError(
+          "http call asynchronous flag must be 'true', 'false', or empty");
     }
 
     // When the last argument is not option table, the timeout is provided at the 5th index.
     int timeout_ms = luaL_checkint(state, 5);
     if (timeout_ms < 0) {
-      luaL_error(state, "http call timeout must be >= 0");
+      return absl::InvalidArgumentError("http call timeout must be >= 0");
     }
     options.request_options_.setTimeout(std::chrono::milliseconds(timeout_ms));
     options.is_async_request_ = lua_toboolean(state, AsyncFlagIndex);
@@ -448,13 +474,17 @@ int StreamHandleWrapper::luaHttpCall(lua_State* state) {
   return doHttpCall(state, options);
 }
 
-int StreamHandleWrapper::doHttpCall(lua_State* state, const HttpCallOptions& options) {
+absl::StatusOr<int> StreamHandleWrapper::doHttpCall(lua_State* state,
+                                                    const HttpCallOptions& options) {
   if (options.is_async_request_) {
-    makeHttpCall(state, filter_, options.request_options_, noopCallbacks());
+    auto request_or = makeHttpCall(state, filter_, options.request_options_, noopCallbacks());
+    RETURN_IF_NOT_OK(request_or.status());
     return 0;
   }
 
-  http_request_ = makeHttpCall(state, filter_, options.request_options_, *this);
+  auto request_or = makeHttpCall(state, filter_, options.request_options_, *this);
+  RETURN_IF_NOT_OK(request_or.status());
+  http_request_ = request_or.value();
   if (http_request_ != nullptr) {
     state_ = State::HttpCall;
     return_duplicate_headers_ = options.return_duplicate_headers_;
@@ -562,7 +592,7 @@ void StreamHandleWrapper::onFailure(const Http::AsyncClient::Request& request,
   onSuccess(request, std::move(response_message));
 }
 
-int StreamHandleWrapper::luaHeaders(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaHeaders(lua_State* state) {
   ASSERT(state_ == State::Running);
 
   if (headers_wrapper_.get() != nullptr) {
@@ -588,7 +618,7 @@ int StreamHandleWrapper::luaHeaders(lua_State* state) {
   return 1;
 }
 
-int StreamHandleWrapper::luaBody(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaBody(lua_State* state) {
   ASSERT(state_ == State::Running);
 
   bool always_wrap_body = false;
@@ -600,7 +630,7 @@ int StreamHandleWrapper::luaBody(lua_State* state) {
 
   if (end_stream_) {
     if (!buffered_body_ && saw_body_) {
-      return luaL_error(state, "cannot call body() after body has been streamed");
+      return absl::InvalidArgumentError("cannot call body() after body has been streamed");
     } else {
       if (body_wrapper_.get() != nullptr) {
         body_wrapper_.pushStack();
@@ -624,7 +654,7 @@ int StreamHandleWrapper::luaBody(lua_State* state) {
       return 1;
     }
   } else if (saw_body_) {
-    return luaL_error(state, "cannot call body() after body streaming has started");
+    return absl::InvalidArgumentError("cannot call body() after body streaming has started");
   } else {
     ENVOY_LOG(debug, "yielding for full body");
     state_ = State::WaitForBody;
@@ -633,11 +663,11 @@ int StreamHandleWrapper::luaBody(lua_State* state) {
   }
 }
 
-int StreamHandleWrapper::luaBodyChunks(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaBodyChunks(lua_State* state) {
   ASSERT(state_ == State::Running);
 
   if (saw_body_) {
-    luaL_error(state, "cannot call bodyChunks after body processing has begun");
+    return absl::InvalidArgumentError("cannot call bodyChunks after body processing has begun");
   }
 
   // We are currently at the top of the stack. Push a closure that has us as the upvalue.
@@ -645,7 +675,7 @@ int StreamHandleWrapper::luaBodyChunks(lua_State* state) {
   return 1;
 }
 
-int StreamHandleWrapper::luaBodyIterator(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaBodyIterator(lua_State* state) {
   ASSERT(state_ == State::Running);
 
   if (end_stream_) {
@@ -658,7 +688,7 @@ int StreamHandleWrapper::luaBodyIterator(lua_State* state) {
   }
 }
 
-int StreamHandleWrapper::luaTrailers(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaTrailers(lua_State* state) {
   ASSERT(state_ == State::Running);
 
   if (end_stream_ && trailers_ == nullptr) {
@@ -679,7 +709,7 @@ int StreamHandleWrapper::luaTrailers(lua_State* state) {
   }
 }
 
-int StreamHandleWrapper::luaMetadata(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaMetadata(lua_State* state) {
   ASSERT(state_ == State::Running);
   if (metadata_wrapper_.get() != nullptr) {
     metadata_wrapper_.pushStack();
@@ -690,7 +720,7 @@ int StreamHandleWrapper::luaMetadata(lua_State* state) {
   return 1;
 }
 
-int StreamHandleWrapper::luaVirtualHost(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaVirtualHost(lua_State* state) {
   ASSERT(state_ == State::Running);
   if (virtual_host_wrapper_.get() != nullptr) {
     virtual_host_wrapper_.pushStack();
@@ -702,7 +732,7 @@ int StreamHandleWrapper::luaVirtualHost(lua_State* state) {
   return 1;
 }
 
-int StreamHandleWrapper::luaRoute(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaRoute(lua_State* state) {
   ASSERT(state_ == State::Running);
   if (route_wrapper_.get() != nullptr) {
     route_wrapper_.pushStack();
@@ -713,7 +743,7 @@ int StreamHandleWrapper::luaRoute(lua_State* state) {
   return 1;
 }
 
-int StreamHandleWrapper::luaStreamInfo(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaStreamInfo(lua_State* state) {
   ASSERT(state_ == State::Running);
   if (stream_info_wrapper_.get() != nullptr) {
     stream_info_wrapper_.pushStack();
@@ -723,7 +753,7 @@ int StreamHandleWrapper::luaStreamInfo(lua_State* state) {
   return 1;
 }
 
-int StreamHandleWrapper::luaConnectionStreamInfo(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaConnectionStreamInfo(lua_State* state) {
   ASSERT(state_ == State::Running);
   if (connection_stream_info_wrapper_.get() != nullptr) {
     connection_stream_info_wrapper_.pushStack();
@@ -734,7 +764,7 @@ int StreamHandleWrapper::luaConnectionStreamInfo(lua_State* state) {
   return 1;
 }
 
-int StreamHandleWrapper::luaConnection(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaConnection(lua_State* state) {
   ASSERT(state_ == State::Running);
   if (connection_wrapper_.get() != nullptr) {
     connection_wrapper_.pushStack();
@@ -745,7 +775,7 @@ int StreamHandleWrapper::luaConnection(lua_State* state) {
   return 1;
 }
 
-int StreamHandleWrapper::luaVerifySignature(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaVerifySignature(lua_State* state) {
   // Step 1: Get hash function.
   absl::string_view hash = luaL_checkstring(state, 2);
 
@@ -753,8 +783,7 @@ int StreamHandleWrapper::luaVerifySignature(lua_State* state) {
   auto key = luaL_checkstring(state, 3);
   auto ptr = public_key_storage_.find(key);
   if (ptr == public_key_storage_.end()) {
-    luaL_error(state, "invalid public key");
-    return 0;
+    return absl::InvalidArgumentError("invalid public key");
   }
 
   // Step 3: Get signature from args.
@@ -780,7 +809,7 @@ int StreamHandleWrapper::luaVerifySignature(lua_State* state) {
   return 2;
 }
 
-int StreamHandleWrapper::luaImportPublicKey(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaImportPublicKey(lua_State* state) {
   // Get byte array and the length.
   const char* str = luaL_checkstring(state, 2);
   int n = luaL_checknumber(state, 3);
@@ -811,7 +840,7 @@ int StreamHandleWrapper::luaImportPublicKey(lua_State* state) {
   return 1;
 }
 
-int StreamHandleWrapper::luaBase64Escape(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaBase64Escape(lua_State* state) {
   absl::string_view input = Filters::Common::Lua::getStringViewFromLuaString(state, 2);
   auto output = absl::Base64Escape(input);
   lua_pushlstring(state, output.data(), output.size());
@@ -819,7 +848,7 @@ int StreamHandleWrapper::luaBase64Escape(lua_State* state) {
   return 1;
 }
 
-int StreamHandleWrapper::luaBase64Decode(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaBase64Decode(lua_State* state) {
   absl::string_view input = Filters::Common::Lua::getStringViewFromLuaString(state, 2);
   std::string output;
   if (!absl::Base64Unescape(input, &output)) {
@@ -833,7 +862,7 @@ int StreamHandleWrapper::luaBase64Decode(lua_State* state) {
   return 1;
 }
 
-int StreamHandleWrapper::luaTimestamp(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaTimestamp(lua_State* state) {
   auto now = time_source_.systemTime().time_since_epoch();
 
   absl::string_view unit_parameter = luaL_optstring(state, 2, "");
@@ -848,13 +877,13 @@ int StreamHandleWrapper::luaTimestamp(lua_State* state) {
              resolution_as_int_from_state == enumToInt(Timestamp::Resolution::Millisecond)) {
     lua_pushnumber(state, milliseconds_since_epoch);
   } else {
-    luaL_error(state, "timestamp format must be MILLISECOND.");
+    return absl::InvalidArgumentError("timestamp format must be MILLISECOND.");
   }
 
   return 1;
 }
 
-int StreamHandleWrapper::luaTimestampString(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaTimestampString(lua_State* state) {
   auto now = time_source_.systemTime().time_since_epoch();
 
   absl::string_view unit_parameter = luaL_optstring(state, 2, "");
@@ -870,7 +899,7 @@ int StreamHandleWrapper::luaTimestampString(lua_State* state) {
     std::string timestamp = std::to_string(microseconds_since_epoch);
     lua_pushlstring(state, timestamp.data(), timestamp.size());
   } else {
-    luaL_error(state, "timestamp format must be MILLISECOND or MICROSECOND.");
+    return absl::InvalidArgumentError("timestamp format must be MILLISECOND or MICROSECOND.");
   }
   return 1;
 }
@@ -1041,17 +1070,17 @@ void Filter::scriptError(const absl::Status& status) {
   response_stream_wrapper_.reset();
 }
 
-int StreamHandleWrapper::luaSetUpstreamOverrideHost(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaSetUpstreamOverrideHost(lua_State* state) {
   // Get the host address argument
   size_t len;
   const char* host = luaL_checklstring(state, 2, &len);
 
   // Validate that host is not null and is an IP address
   if (host == nullptr) {
-    luaL_error(state, "host argument is required");
+    return absl::InvalidArgumentError("host argument is required");
   }
   if (!Http::Utility::parseAuthority(host).is_ip_address_) {
-    luaL_error(state, "host is not a valid IP address");
+    return absl::InvalidArgumentError("host is not a valid IP address");
   }
 
   // Get the optional strict flag (defaults to false)
@@ -1067,12 +1096,12 @@ int StreamHandleWrapper::luaSetUpstreamOverrideHost(lua_State* state) {
   return 0;
 }
 
-int StreamHandleWrapper::luaClearRouteCache(lua_State*) {
+absl::StatusOr<int> StreamHandleWrapper::luaClearRouteCache(lua_State*) {
   callbacks_.clearRouteCache();
   return 0;
 }
 
-int StreamHandleWrapper::luaFilterContext(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaFilterContext(lua_State* state) {
   ASSERT(state_ == State::Running);
   if (filter_context_wrapper_.get() != nullptr) {
     filter_context_wrapper_.pushStack();
@@ -1083,7 +1112,7 @@ int StreamHandleWrapper::luaFilterContext(lua_State* state) {
   return 1;
 }
 
-int StreamHandleWrapper::luaStats(lua_State* state) {
+absl::StatusOr<int> StreamHandleWrapper::luaStats(lua_State* state) {
   ASSERT(state_ == State::Running);
   if (stats_scope_wrapper_.get() != nullptr) {
     stats_scope_wrapper_.pushStack();
@@ -1093,8 +1122,8 @@ int StreamHandleWrapper::luaStats(lua_State* state) {
   return 1;
 }
 
-void Filter::DecoderCallbacks::respond(Http::ResponseHeaderMapPtr&& headers, Buffer::Instance* body,
-                                       lua_State*) {
+absl::Status Filter::DecoderCallbacks::respond(Http::ResponseHeaderMapPtr&& headers,
+                                               Buffer::Instance* body, lua_State*) {
   uint64_t status = Http::Utility::getResponseStatus(*headers);
   auto modify_headers = [&headers](Http::ResponseHeaderMap& response_headers) {
     headers->iterate(
@@ -1107,17 +1136,18 @@ void Filter::DecoderCallbacks::respond(Http::ResponseHeaderMapPtr&& headers, Buf
   callbacks_->sendLocalReply(static_cast<Envoy::Http::Code>(status), body ? body->toString() : "",
                              modify_headers, std::nullopt,
                              HttpResponseCodeDetails::get().LuaResponse);
+  return absl::OkStatus();
 }
 
 const Protobuf::Struct& Filter::DecoderCallbacks::metadata() const {
   return getMetadata(callbacks_);
 }
 
-void Filter::EncoderCallbacks::respond(Http::ResponseHeaderMapPtr&&, Buffer::Instance*,
-                                       lua_State* state) {
+absl::Status Filter::EncoderCallbacks::respond(Http::ResponseHeaderMapPtr&&, Buffer::Instance*,
+                                               lua_State*) {
   // TODO(mattklein123): Support response in response path if nothing has been continued
   // yet.
-  luaL_error(state, "respond not currently supported in the response path");
+  return absl::InvalidArgumentError("respond not currently supported in the response path");
 }
 
 const Protobuf::Struct& Filter::EncoderCallbacks::metadata() const {

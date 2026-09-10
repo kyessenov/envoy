@@ -12,6 +12,7 @@
 #include "source/common/common/logger.h"
 
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "lua.hpp"
 
 namespace Envoy {
@@ -33,6 +34,23 @@ namespace Lua {
  * to callers which avoids the messy C++ template programming I mentioned above.
  */
 
+class LuaErrorMessage {
+public:
+  static void set(const absl::Status& status) {
+    absl::string_view msg = status.message();
+    size_t copy_len = std::min(msg.size(), sizeof(buffer_) - 1);
+    if (copy_len > 0) {
+      memcpy(buffer_, msg.data(), copy_len);
+    }
+    buffer_[copy_len] = '\0';
+  }
+
+  static const char* c_str() { return buffer_; }
+
+private:
+  static thread_local char buffer_[1024];
+};
+
 /**
  * Base macro for declaring a Lua/C function. Any function declared will need to be exported via
  * the exportedFunctions() function in BaseLuaObject. See BaseLuaObject below for more
@@ -45,12 +63,26 @@ namespace Lua {
  */
 #define DECLARE_LUA_FUNCTION_EX(Class, Name, Index)                                                \
   static int static_##Name(lua_State* state) {                                                     \
-    Class* object = ::Envoy::Extensions::Filters::Common::Lua::alignAndCast<Class>(                \
-        luaL_checkudata(state, Index, typeid(Class).name()));                                      \
-    object->checkDead(state);                                                                      \
-    return object->Name(state);                                                                    \
+    {                                                                                              \
+      Class* object = ::Envoy::Extensions::Filters::Common::Lua::alignAndCast<Class>(              \
+          luaL_checkudata(state, Index, typeid(Class).name()));                                    \
+      const absl::Status dead_status = object->checkDead();                                        \
+      if (dead_status.ok()) {                                                                      \
+        const absl::StatusOr<int> result = object->Name(state);                                    \
+        if (result.ok()) {                                                                         \
+          return *result;                                                                          \
+        }                                                                                          \
+        ::Envoy::Extensions::Filters::Common::Lua::LuaErrorMessage::set(result.status());          \
+      } else {                                                                                     \
+        ::Envoy::Extensions::Filters::Common::Lua::LuaErrorMessage::set(dead_status);              \
+      }                                                                                            \
+    }                                                                                              \
+    /* Nothing with a destructor is live on the stack here, so it is safe for luaL_error() to      \
+     * unwind. */                                                                                  \
+    return luaL_error(state, "%s",                                                                 \
+                      ::Envoy::Extensions::Filters::Common::Lua::LuaErrorMessage::c_str());        \
   }                                                                                                \
-  int Name(lua_State* state);
+  absl::StatusOr<int> Name(lua_State* state);
 
 /**
  * Declare a Lua function in which userdata is in stack slot 1. See DECLARE_LUA_FUNCTION_EX()
@@ -217,11 +249,11 @@ public:
    * are used again they will throw a Lua error and not reach our code.
    * @param state supplies the calling LuaState.
    */
-  int checkDead(lua_State* state) {
+  absl::Status checkDead() {
     if (dead_) {
-      return luaL_error(state, "object used outside of proper scope");
+      return absl::InvalidArgumentError("object used outside of proper scope");
     }
-    return 0;
+    return absl::OkStatus();
   }
 
   /**
@@ -272,37 +304,37 @@ private:
   bool dead_{};
 };
 
-template <class T> int BaseLuaObject<T>::luaLogTrace(lua_State* state) {
+template <class T> absl::StatusOr<int> BaseLuaObject<T>::luaLogTrace(lua_State* state) {
   absl::string_view message = Filters::Common::Lua::getStringViewFromLuaString(state, 2);
   scriptLog(spdlog::level::trace, message);
   return 0;
 }
 
-template <class T> int BaseLuaObject<T>::luaLogDebug(lua_State* state) {
+template <class T> absl::StatusOr<int> BaseLuaObject<T>::luaLogDebug(lua_State* state) {
   absl::string_view message = Filters::Common::Lua::getStringViewFromLuaString(state, 2);
   scriptLog(spdlog::level::debug, message);
   return 0;
 }
 
-template <class T> int BaseLuaObject<T>::luaLogInfo(lua_State* state) {
+template <class T> absl::StatusOr<int> BaseLuaObject<T>::luaLogInfo(lua_State* state) {
   absl::string_view message = Filters::Common::Lua::getStringViewFromLuaString(state, 2);
   scriptLog(spdlog::level::info, message);
   return 0;
 }
 
-template <class T> int BaseLuaObject<T>::luaLogWarn(lua_State* state) {
+template <class T> absl::StatusOr<int> BaseLuaObject<T>::luaLogWarn(lua_State* state) {
   absl::string_view message = Filters::Common::Lua::getStringViewFromLuaString(state, 2);
   scriptLog(spdlog::level::warn, message);
   return 0;
 }
 
-template <class T> int BaseLuaObject<T>::luaLogErr(lua_State* state) {
+template <class T> absl::StatusOr<int> BaseLuaObject<T>::luaLogErr(lua_State* state) {
   absl::string_view message = Filters::Common::Lua::getStringViewFromLuaString(state, 2);
   scriptLog(spdlog::level::err, message);
   return 0;
 }
 
-template <class T> int BaseLuaObject<T>::luaLogCritical(lua_State* state) {
+template <class T> absl::StatusOr<int> BaseLuaObject<T>::luaLogCritical(lua_State* state) {
   absl::string_view message = Filters::Common::Lua::getStringViewFromLuaString(state, 2);
   scriptLog(spdlog::level::critical, message);
   return 0;

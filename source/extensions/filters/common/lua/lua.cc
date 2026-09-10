@@ -16,6 +16,8 @@ namespace Filters {
 namespace Common {
 namespace Lua {
 
+thread_local char LuaErrorMessage::buffer_[1024];
+
 void LuaLoggable::scriptLog(spdlog::level::level_enum level, absl::string_view message) {
   switch (level) {
   case spdlog::level::trace:

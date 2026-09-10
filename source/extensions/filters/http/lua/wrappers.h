@@ -114,7 +114,7 @@ private:
    */
   DECLARE_LUA_FUNCTION(HeaderMapWrapper, luaSetHttp1ReasonPhrase);
 
-  void checkModifiable(lua_State* state);
+  absl::Status checkModifiable();
 
   // Envoy::Lua::BaseLuaObject
   void onMarkDead() override {

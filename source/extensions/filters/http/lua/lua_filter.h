@@ -99,8 +99,8 @@ public:
    * @param body supplies the optional response body.
    * @param state supplies the active Lua state.
    */
-  virtual void respond(Http::ResponseHeaderMapPtr&& headers, Buffer::Instance* body,
-                       lua_State* state) PURE;
+  virtual absl::Status respond(Http::ResponseHeaderMapPtr&& headers, Buffer::Instance* body,
+                               lua_State* state) PURE;
 
   /**
    * @return const Protobuf::Struct& the value of metadata inside the lua filter scope of current
@@ -395,7 +395,7 @@ private:
 
   enum Timestamp::Resolution getTimestampResolution(absl::string_view unit_parameter);
 
-  int doHttpCall(lua_State* state, const HttpCallOptions& options);
+  absl::StatusOr<int> doHttpCall(lua_State* state, const HttpCallOptions& options);
 
   // Resumes the coroutine only if it is safe to do so. Returns the coroutine execution status;
   // OK when resumption was skipped because the stream was reset.
@@ -622,8 +622,8 @@ private:
       }
       callbacks_->downstreamCallbacks()->clearRouteCache();
     }
-    void respond(Http::ResponseHeaderMapPtr&& headers, Buffer::Instance* body,
-                 lua_State* state) override;
+    absl::Status respond(Http::ResponseHeaderMapPtr&& headers, Buffer::Instance* body,
+                         lua_State* state) override;
 
     const Protobuf::Struct& metadata() const override;
     StreamInfo::StreamInfo& streamInfo() override { return callbacks_->streamInfo(); }
@@ -660,8 +660,8 @@ private:
     const Buffer::Instance* bufferedBody() override { return callbacks_->encodingBuffer(); }
     void continueIteration() override { return callbacks_->continueEncoding(); }
     void onHeadersModified() override {}
-    void respond(Http::ResponseHeaderMapPtr&& headers, Buffer::Instance* body,
-                 lua_State* state) override;
+    absl::Status respond(Http::ResponseHeaderMapPtr&& headers, Buffer::Instance* body,
+                         lua_State* state) override;
 
     const Protobuf::Struct& metadata() const override;
     StreamInfo::StreamInfo& streamInfo() override { return callbacks_->streamInfo(); }

@@ -44,17 +44,18 @@ int64_t timestampInSeconds(const std::optional<SystemTime>& system_time) {
 }
 } // namespace
 
-int BufferWrapper::luaLength(lua_State* state) {
+absl::StatusOr<int> BufferWrapper::luaLength(lua_State* state) {
   lua_pushnumber(state, data_.length());
   return 1;
 }
 
-int BufferWrapper::luaGetBytes(lua_State* state) {
+absl::StatusOr<int> BufferWrapper::luaGetBytes(lua_State* state) {
   const int index = luaL_checkint(state, 2);
   const int length = luaL_checkint(state, 3);
   if (index < 0 || length < 0 ||
       static_cast<uint64_t>(index) + static_cast<uint64_t>(length) > data_.length()) {
-    luaL_error(state, "index/length must be >= 0 and (index + length) must be <= buffer size");
+    return absl::InvalidArgumentError(
+        "index/length must be >= 0 and (index + length) must be <= buffer size");
   }
 
   // Note: Lua buffer API (`luaL_prepbuffsize`) could reduce copies here, but Envoy
@@ -65,7 +66,7 @@ int BufferWrapper::luaGetBytes(lua_State* state) {
   return 1;
 }
 
-int BufferWrapper::luaSetBytes(lua_State* state) {
+absl::StatusOr<int> BufferWrapper::luaSetBytes(lua_State* state) {
   data_.drain(data_.length());
   ASSERT(data_.length() == 0); // Defensive check.
   absl::string_view bytes = getStringViewFromLuaString(state, 2);
@@ -225,7 +226,7 @@ Protobuf::Struct MetadataMapHelper::loadStruct(lua_State* state) {
 MetadataMapIterator::MetadataMapIterator(MetadataMapWrapper& parent)
     : parent_{parent}, current_{parent.metadata_.fields().begin()} {}
 
-int MetadataMapIterator::luaPairsIterator(lua_State* state) {
+absl::StatusOr<int> MetadataMapIterator::luaPairsIterator(lua_State* state) {
   if (current_ == parent_.metadata_.fields().end()) {
     parent_.iterator_.reset();
     return 0;
@@ -238,7 +239,7 @@ int MetadataMapIterator::luaPairsIterator(lua_State* state) {
   return 2;
 }
 
-int MetadataMapWrapper::luaGet(lua_State* state) {
+absl::StatusOr<int> MetadataMapWrapper::luaGet(lua_State* state) {
   const char* key = luaL_checkstring(state, 2);
   const auto filter_it = metadata_.fields().find(key);
   if (filter_it == metadata_.fields().end()) {
@@ -249,9 +250,10 @@ int MetadataMapWrapper::luaGet(lua_State* state) {
   return 1;
 }
 
-int MetadataMapWrapper::luaPairs(lua_State* state) {
+absl::StatusOr<int> MetadataMapWrapper::luaPairs(lua_State* state) {
   if (iterator_.get() != nullptr) {
-    luaL_error(state, "cannot create a second iterator before completing the first");
+    return absl::InvalidArgumentError(
+        "cannot create a second iterator before completing the first");
   }
 
   iterator_.reset(MetadataMapIterator::create(state, *this), true);
@@ -259,69 +261,69 @@ int MetadataMapWrapper::luaPairs(lua_State* state) {
   return 1;
 }
 
-int ParsedX509NameWrapper::luaCommonName(lua_State* state) {
+absl::StatusOr<int> ParsedX509NameWrapper::luaCommonName(lua_State* state) {
   const std::string& commonName = parsed_name_.commonName_;
   lua_pushlstring(state, commonName.data(), commonName.size());
   return 1;
 }
 
-int ParsedX509NameWrapper::luaOrganizationName(lua_State* state) {
+absl::StatusOr<int> ParsedX509NameWrapper::luaOrganizationName(lua_State* state) {
   createLuaTableFromStringList(state, parsed_name_.organizationName_);
   return 1;
 }
 
-int SslConnectionWrapper::luaPeerCertificatePresented(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaPeerCertificatePresented(lua_State* state) {
   lua_pushboolean(state, connection_info_.peerCertificatePresented());
   return 1;
 }
 
-int SslConnectionWrapper::luaPeerCertificateValidated(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaPeerCertificateValidated(lua_State* state) {
   lua_pushboolean(state, connection_info_.peerCertificateValidated());
   return 1;
 }
 
-int SslConnectionWrapper::luaUriSanLocalCertificate(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaUriSanLocalCertificate(lua_State* state) {
   createLuaTableFromStringList(state, connection_info_.uriSanLocalCertificate());
   return 1;
 }
 
-int SslConnectionWrapper::luaSha256PeerCertificateDigest(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaSha256PeerCertificateDigest(lua_State* state) {
   const std::string& cert_digest = connection_info_.sha256PeerCertificateDigest();
   lua_pushlstring(state, cert_digest.data(), cert_digest.size());
   return 1;
 }
 
-int SslConnectionWrapper::luaSerialNumberPeerCertificate(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaSerialNumberPeerCertificate(lua_State* state) {
   const std::string& peer_cert = connection_info_.serialNumberPeerCertificate();
   lua_pushlstring(state, peer_cert.data(), peer_cert.size());
   return 1;
 }
 
-int SslConnectionWrapper::luaIssuerPeerCertificate(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaIssuerPeerCertificate(lua_State* state) {
   const std::string& peer_cert_serial = connection_info_.issuerPeerCertificate();
   lua_pushlstring(state, peer_cert_serial.data(), peer_cert_serial.size());
   return 1;
 }
 
-int SslConnectionWrapper::luaSha256PeerCertificateIssuerDigest(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaSha256PeerCertificateIssuerDigest(lua_State* state) {
   const std::string& hash = connection_info_.sha256PeerCertificateIssuerDigest();
   lua_pushlstring(state, hash.data(), hash.size());
   return 1;
 }
 
-int SslConnectionWrapper::luaSerialNumberPeerCertificateIssuer(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaSerialNumberPeerCertificateIssuer(lua_State* state) {
   const std::string& serial = connection_info_.serialNumberPeerCertificateIssuer();
   lua_pushlstring(state, serial.data(), serial.size());
   return 1;
 }
 
-int SslConnectionWrapper::luaSubjectPeerCertificate(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaSubjectPeerCertificate(lua_State* state) {
   const std::string& peer_cert_subject = connection_info_.subjectPeerCertificate();
   lua_pushlstring(state, peer_cert_subject.data(), peer_cert_subject.size());
   return 1;
 }
 
-int SslConnectionWrapper::luaParsedSubjectPeerCertificate(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaParsedSubjectPeerCertificate(lua_State* state) {
   auto parsed_name = connection_info_.parsedSubjectPeerCertificate();
   if (parsed_name.has_value()) {
     if (parsed_subject_peer_certificate_.get() != nullptr) {
@@ -336,86 +338,87 @@ int SslConnectionWrapper::luaParsedSubjectPeerCertificate(lua_State* state) {
   return 1;
 }
 
-int SslConnectionWrapper::luaUriSanPeerCertificate(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaUriSanPeerCertificate(lua_State* state) {
   createLuaTableFromStringList(state, connection_info_.uriSanPeerCertificate());
   return 1;
 }
 
-int SslConnectionWrapper::luaSubjectLocalCertificate(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaSubjectLocalCertificate(lua_State* state) {
   const std::string& subject_local_cert = connection_info_.subjectLocalCertificate();
   lua_pushlstring(state, subject_local_cert.data(), subject_local_cert.size());
   return 1;
 }
 
-int SslConnectionWrapper::luaDnsSansPeerCertificate(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaDnsSansPeerCertificate(lua_State* state) {
   createLuaTableFromStringList(state, connection_info_.dnsSansPeerCertificate());
   return 1;
 }
 
-int SslConnectionWrapper::luaDnsSansLocalCertificate(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaDnsSansLocalCertificate(lua_State* state) {
   createLuaTableFromStringList(state, connection_info_.dnsSansLocalCertificate());
   return 1;
 }
 
-int SslConnectionWrapper::luaOidsPeerCertificate(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaOidsPeerCertificate(lua_State* state) {
   createLuaTableFromStringList(state, connection_info_.oidsPeerCertificate());
   return 1;
 }
 
-int SslConnectionWrapper::luaOidsLocalCertificate(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaOidsLocalCertificate(lua_State* state) {
   createLuaTableFromStringList(state, connection_info_.oidsLocalCertificate());
   return 1;
 }
 
-int SslConnectionWrapper::luaValidFromPeerCertificate(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaValidFromPeerCertificate(lua_State* state) {
   lua_pushinteger(state, timestampInSeconds(connection_info_.validFromPeerCertificate()));
   return 1;
 }
 
-int SslConnectionWrapper::luaExpirationPeerCertificate(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaExpirationPeerCertificate(lua_State* state) {
   lua_pushinteger(state, timestampInSeconds(connection_info_.expirationPeerCertificate()));
   return 1;
 }
 
-int SslConnectionWrapper::luaSessionId(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaSessionId(lua_State* state) {
   const std::string& session_id = connection_info_.sessionId();
   lua_pushlstring(state, session_id.data(), session_id.size());
   return 1;
 }
 
-int SslConnectionWrapper::luaCiphersuiteId(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaCiphersuiteId(lua_State* state) {
   const std::string& cipher_suite_id =
       absl::StrCat("0x", Hex::uint16ToHex(connection_info_.ciphersuiteId()));
   lua_pushlstring(state, cipher_suite_id.data(), cipher_suite_id.size());
   return 1;
 }
 
-int SslConnectionWrapper::luaCiphersuiteString(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaCiphersuiteString(lua_State* state) {
   const absl::string_view cipher_suite = connection_info_.ciphersuiteString();
   lua_pushlstring(state, cipher_suite.data(), cipher_suite.size());
   return 1;
 }
 
-int SslConnectionWrapper::luaUrlEncodedPemEncodedPeerCertificate(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaUrlEncodedPemEncodedPeerCertificate(lua_State* state) {
   const std::string& peer_cert_pem = connection_info_.urlEncodedPemEncodedPeerCertificate();
   lua_pushlstring(state, peer_cert_pem.data(), peer_cert_pem.size());
   return 1;
 }
 
-int SslConnectionWrapper::luaUrlEncodedPemEncodedPeerCertificateChain(lua_State* state) {
+absl::StatusOr<int>
+SslConnectionWrapper::luaUrlEncodedPemEncodedPeerCertificateChain(lua_State* state) {
   const std::string& peer_cert_chain_pem =
       connection_info_.urlEncodedPemEncodedPeerCertificateChain();
   lua_pushlstring(state, peer_cert_chain_pem.data(), peer_cert_chain_pem.size());
   return 1;
 }
 
-int SslConnectionWrapper::luaTlsVersion(lua_State* state) {
+absl::StatusOr<int> SslConnectionWrapper::luaTlsVersion(lua_State* state) {
   const std::string& tls_version = connection_info_.tlsVersion();
   lua_pushlstring(state, tls_version.data(), tls_version.size());
   return 1;
 }
 
-int ConnectionWrapper::luaSsl(lua_State* state) {
+absl::StatusOr<int> ConnectionWrapper::luaSsl(lua_State* state) {
   ENVOY_LOG_MISC(warn, "connection():ssl() is deprecated and will be removed in a future release. "
                        "Use streamInfo():downstreamSslConnection() instead.");
 
